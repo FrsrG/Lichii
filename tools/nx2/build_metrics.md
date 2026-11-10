@@ -208,3 +208,67 @@ the existing branch concurrency policy cancels an older run on a new push.
 Sources: [GitHub artifact availability](https://github.blog/changelog/2024-02-12-github-actions-artifacts-v4-is-now-generally-available/),
 [cache scopes and versions](https://docs.github.com/en/actions/reference/workflows-and-actions/dependency-caching),
 and [ccache 4.14.2 options](https://ccache.dev/manual/4.14.2.html).
+
+## Integrated IMAD quick-loop check
+
+The next bounded check used integrated source
+`9d71cf868a14d6217442702ddb53a3f47626580d`, merged into the isolated measurement
+worktree as `0b843c6bdbcf61ddc7f5fce487c1299278aece1e`. The relevant production
+headers, test sources, standalone target and workflow were identical to the
+integrated source. The target now contains four production test translation
+units, including `ampere_yoshi_imad.cpp`, plus `main.cpp`; it fetches the pinned
+Catch2 and header-only fmt dependencies. The earlier cold/header/job/memory
+measurements above still describe the original three-test-translation-unit
+target and were not repeated or relabeled.
+
+This run reused the existing persistent Ninja build and portable ccache directory.
+It used MSVC 19.44.35229, Windows SDK 10.0.26100.0, CMake 3.31.6-msvc6, Ninja
+1.12.1 and ccache 4.14.2, with Release `/O2 /Ob2 /DNDEBUG`, four jobs and LTO off.
+These are local MSVC checks, separate from CI's clang-cl compiler.
+
+| Check | Elapsed | Result |
+| --- | ---: | --- |
+| Release reconfigure | 0.606 s | Pinned fmt added; configuration verified |
+| Recovery/integrated rebuild | 14.830 s | 106 direct hits, 5 misses; see qualification below |
+| Direct Catch2 run | 0.065 s | 34 test cases, 4,381 assertions passed |
+| CTest with `--no-tests=error` | 0.123 s | 2/2 entries passed, including empty-selection rejection |
+| Unchanged Ninja build | 0.094 s | No work; zero compiler-cache calls |
+| Forced unchanged five-object rebuild | 0.332 s | 5/5 direct hits, zero misses |
+| CTest after restored cached objects | 0.157 s | 2/2 entries passed |
+
+The first configure attempt supplied the same compiler with a differently cased
+`HostX64` path. CMake treated that as a compiler change, reset the cache and lost
+the requested Release/launcher settings. The resulting owned build was stopped;
+its logs are retained separately. The corrected invocation preserves the existing
+compiler setting and explicitly verifies Release, ccache and LTO-off values after
+configuration. Consequently, the 14.830 s row includes recovery of dependency
+outputs through ccache and is neither a cold baseline nor a representative
+shader-only edit. No before/after speedup is inferred from it.
+
+For the forced unchanged check, exactly the five `.obj` files beneath the owned
+`build/CMakeFiles/ampere-quick-tests.dir` subtree were removed after verifying their
+resolved absolute paths. Catch2 objects and the compiler cache were retained.
+No production header was edited. The final standalone executable SHA-256 was
+`381f55d4aaada9c651b0b95eba5938877b6045a38cf2a681a8e1ae9b267345e2`.
+
+Local invocation and raw records:
+
+```powershell
+& 'C:/Games/SWITCH 2/lichii-investigation/build-metrics/run-integrated-quick-loop.ps1'
+```
+
+The script refuses to overwrite its recorded evidence directory. The successful
+records are under
+`C:/Games/SWITCH 2/lichii-investigation/build-metrics/integrated-9d71-quick-loop-release/`:
+`cases.json`, `provenance.json`, `cmake-flags.txt`, `forced-object-paths.txt`, logs,
+per-stage ccache JSON and the actual CTest JUnit report. The earlier stopped
+configuration attempt is under the sibling `integrated-9d71-quick-loop/` directory.
+
+Fresh review found no concrete blocker in the two-stage workflow or provenance
+helper. All five provenance fixture tests passed, the PowerShell helper parsed,
+and a provisional-to-validated fixture transition accepted the actual quick-target
+CTest JUnit format (two executed entries, zero failures). Fixture runtime files
+were explicit non-executable text and were never launched. This verifies the XML
+format and state gate only; the two-stage CI flow and full-emulator validation
+remain separate. No game, full emulator build, workflow dispatch or remote push
+was performed by this check.
