@@ -61,8 +61,10 @@ The current process has no listening debug server. It was left running.
 2. Port the relevant existing shader work; review full register ranges and
    predicate liveness before relying on it.
 3. Compile the Windows emulator and run the project's tests using the same
-   clang-cl/Qt toolchain as upstream. This PC has no C++ toolchain installed;
-   a fork-only GitHub Actions workflow produces the candidate package.
+   clang-cl/Qt toolchain as upstream. Initial PATH and `vswhere` checks did not
+   expose a configured compiler. Later inspection found working MSVC 19.44 and
+   SDK 10.0.26100.0 under Visual Studio Build Tools 2022; local quick tests now
+   use those tools. CI uses clang-cl 22.1.8, which was not found locally.
 4. Launch that package locally with the opt-in debug server and shader dump.
    Record the exact source SHA and preserve the original package and saves.
 5. Observe the same post-intro scene. Collect a screenshot, new log, rejected
@@ -114,8 +116,22 @@ after the workflow has an observed successful gameplay result.
   buffer-coordinate programs.
 - First Windows candidate: source `db65715f3401ba2cd0ecda91f677e06ff6e20e85`,
   [build run](https://github.com/FrsrG/Lichii/actions/runs/42910339018).
-  Compilation/test result and gameplay result are pending. Later test and
-  buffer-boundary commits do not change the captured 3D/R8 instruction.
+  After 53 m 52 s in the combined compile/link step, the emulator linked at
+  Ninja step 2349/2353, but `shader-sweep.exe` failed at step 2352 with unresolved
+  `GetAdaptersAddresses` and `ConvertLengthToIpv4Mask`. Tests and packaging were
+  skipped. This is a Windows diagnostic-tool link dependency, not evidence of a
+  shader compile failure. No executable from this run was gameplay-tested.
+- Minimal repair (`b52706bb0`): added the existing `${PLATFORM_LIBRARIES}` list
+  to the in-tree shader-sweep link, matching the other executable targets.
+  It includes Windows IP Helper (`iphlpapi`). Source files under `src` are
+  byte-identical to `db65715f3` in the repaired first candidate.
+- Repair run: source `2a4c1797be541e5d15c48b9a0dc426bf141152a0`,
+  [build run](https://github.com/FrsrG/Lichii/actions/runs/42920122983). It uses the
+  same branch and combined cache layout as the first run. The saved cache is
+  285,399,123 bytes; first-run hit/miss/eviction statistics and peak memory were
+  not printed, so they remain unknown. The repaired workflow always reports
+  cache statistics and retains compiled diagnostic packages on a later check
+  failure; failures still fail the job. Gameplay is pending.
 - Test profile: copied locally into the candidate's portable `user` directory;
   configuration NAND, SDMC, load, and dump paths were rewritten to that directory.
   Shader caches were not copied. The user then closed the original normally;
@@ -134,3 +150,41 @@ The independent reviewer audits progress every 15 minutes and checks that work
 continues toward an observed gameplay result. Its first audit prioritized the
 Windows package, exact captured-instruction coverage, and avoiding unrelated
 tooling work. It identified the buffer-coordinate boundary regression above.
+
+## Bounded iteration-loop measurements
+
+Supporting work is isolated from the first candidate. The standalone Ampere
+target uses production headers and the repository's pinned Catch2, without Qt,
+audio, networking libraries, Vulkan, or the emulator core. Local MSVC checks
+passed 29 cases / 2,019 assertions, including the four logged forms. An empty
+selection returns an error, even with Catch2's allow-empty flag. Full production,
+SPIR-V, and gameplay validation remain separate gates.
+
+Measured on MSVC 19.44.35229, SDK 10.0.26100.0, Ninja 1.12.1, ccache 4.14.2,
+four jobs, Release, LTO off; these are not CI clang-cl timings:
+
+| Run | Wall time | Cache evidence |
+| --- | ---: | --- |
+| Fresh configure | 3.631 s | Pinned Catch2 source available locally |
+| Cold selected-target build | 44.181 s | 110 misses, 0 hits |
+| Unchanged Ninja no-op | 0.106 s | 0 compiler calls |
+| Forced unchanged compilation | 0.344 s | 4/4 direct hits |
+| Equivalent header-token edit | 14.191 s | 3 misses |
+| Restored original header | 0.386 s | 3/3 direct hits |
+
+All relevant CTest runs passed 2/2. The temporary header edit changed preprocessing
+tokens (`216` to `216U`), preserved semantics, and was restored byte-for-byte;
+no production source change was committed for benchmarking.
+
+A bounded job-count comparison forced three compiler calls in each case:
+
+| Jobs | Header rebuild | Sampled peak aggregate private bytes |
+| ---: | ---: | ---: |
+| 2 | 26.216 s | 709,476,352 (~677 MiB) |
+| 4 | 14.728 s | 1,087,717,376 (~1,037 MiB) |
+
+Sampling targeted the owned CMake process tree every 200 ms; maximum observed
+gaps were 372 ms and 451 ms. Short spikes may be missed, and private allocation
+is not physical RAM usage. Four jobs is justified for this small target; no
+full-emulator parallelism optimum is established. Raw logs and provenance stay
+under the local investigation's `benchmarks/ampere-ccache-msvc-20261110` folder.
