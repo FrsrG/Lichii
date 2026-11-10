@@ -107,6 +107,7 @@ def report(job, log="", run=None, case="unknown", as_of=None):
     result = {
         "schema_version": 1, "case": case, "recorded_at_utc": as_of.isoformat(),
         "source_commit": (run or {}).get("head_sha"), "run_id": (run or {}).get("id"),
+        "source_branch": (run or {}).get("head_branch"), "run_event": (run or {}).get("event"),
         "job_id": job.get("id"), "job_status": job.get("status"),
         "job_conclusion": job.get("conclusion"), "steps": steps,
         "completed_phase_seconds": totals, "compile_seconds": None, "link_seconds": None,
@@ -128,6 +129,7 @@ def main():
     parser.add_argument("--job", required=True, type=Path)
     parser.add_argument("--run", type=Path)
     parser.add_argument("--log", type=Path)
+    parser.add_argument("--cache-state", type=Path, help="recorded cache inventory, including actual branch refs")
     parser.add_argument("--case", choices=("cold", "unchanged", "shader-edit", "unknown"), default="unknown")
     parser.add_argument("--out", type=Path)
     args = parser.parse_args()
@@ -137,8 +139,14 @@ def main():
     run = json.loads(args.run.read_text(encoding="utf-8-sig")) if args.run else None
     log = args.log.read_text(encoding="utf-8-sig", errors="replace") if args.log else ""
     result = report(job, log, run, args.case)
+    if args.cache_state:
+        cache_state = json.loads(args.cache_state.read_text(encoding="utf-8-sig"))
+        result["cache_inventory_observed_at"] = cache_state.get("observed_at")
+        result["observed_cache_entries"] = [
+            {key: entry.get(key) for key in ("key", "ref", "version", "size_in_bytes", "created_at", "last_accessed_at")}
+            for entry in cache_state.get("actions_caches", [])]
     result["input_sha256"] = {str(path): hashlib.sha256(path.read_bytes()).hexdigest()
-                              for path in (args.job, args.run, args.log) if path}
+                              for path in (args.job, args.run, args.log, args.cache_state) if path}
     output = json.dumps(result, indent=2) + "\n"
     if args.out:
         args.out.write_text(output, encoding="utf-8")
