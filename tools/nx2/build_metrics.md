@@ -76,13 +76,53 @@ tests and the empty-selection failure check. Test command wall times were
 0.176 s, 0.174 s and 0.168 s respectively. Every cache case reported zero cleanup
 passes; ccache does not supply a separate eviction count in these captured
 counters. The maximum cache size observed was 5,152 KiB. Peak process memory was
-not sampled by this bounded experiment.
+not sampled by these initial cache cases; the separate job-count check below
+adds a bounded memory sample.
 
 The cold case compiled Catch2 plus four test objects; the forced unchanged case
 compiled four test objects. These are not equal workloads, so do not derive a
 speedup ratio by dividing those wall times. Raw command arguments, logs,
 machine-readable counters and provenance are kept locally under
 `lichii-investigation/benchmarks/ampere-ccache-msvc-20261110`.
+
+## Bounded parallel-job and memory check
+
+A later two-case measurement used the same three test translation units and
+the same equivalent header edit, with `CCACHE_RECACHE=1` forcing actual compiler
+work in both cases. Each captured statistics file reports `recache=3`; these
+forced compilations are not mislabeled cache misses or hits. Source revision
+was `75b5c48cd` (documentation/helper changes after the initial cache experiment;
+production header bytes were unchanged).
+
+| Ninja jobs | Wall time including sampling | Sampled peak aggregate private bytes | Samples | Maximum sample gap |
+| --- | ---: | ---: | ---: | ---: |
+| 2 | 26.216 s | 709,476,352 (about 677 MiB) | 84 | 372 ms |
+| 4 | 14.728 s | 1,087,717,376 (about 1,037 MiB) | 41 | 451 ms |
+
+The requested sampling interval was 200 ms. A Toolhelp process snapshot finds
+the owned CMake process and its descendants, and `Process.PrivateMemorySize64`
+supplies their current private allocation. The sampled aggregate excludes the
+PowerShell sampler, shared allocations and the OS file cache; short-lived
+processes or spikes between samples can be missed. It is not an exact peak
+physical-RAM measurement. The timed command includes sampling overhead.
+
+Four jobs was faster for this small target, with sampled private allocation
+well below the host's 32 GB RAM. This does not establish the optimal job count
+or memory requirement of the full emulator. The original header was restored
+byte for byte and rebuilt; both CTest entries passed afterward.
+
+The task-owned replay commands and complete raw provenance are:
+
+```powershell
+& 'C:/Games/SWITCH 2/lichii-investigation/build-metrics/run-ampere-cache-benchmark.ps1'
+& 'C:/Games/SWITCH 2/lichii-investigation/build-metrics/measure-ampere-job-memory.ps1'
+```
+
+The first command refuses to reuse an existing cold-baseline directory. The
+second expects that disposable benchmark build and cache. Results are in
+`job-memory-comparison.json`, `job-memory-provenance.json`, `cases.json`, the
+per-case logs and ccache counter files under the benchmark directory above.
+No cache benchmark modifies the main source worktree or the gameplay profile.
 
 ## Commands for the measured local stage
 
@@ -125,8 +165,8 @@ leave evidence. Ccache 4.14.2 supports JSON through `--print-stats --format=json
    no measured bottleneck currently justifies a cache-size increase.
 4. Preserve separate timing and always-run cache statistics for each stage.
    Measure compiler/SDK identity after any restored installation. Peak-memory
-   instrumentation and parallel-job comparisons remain future measurements,
-   not results from this run.
+   instrumentation for the full emulator remains a future measurement; the
+   small-target 2-versus-4-job sample is not a full-emulator result.
 
 Sources: [GitHub artifact availability](https://github.blog/changelog/2024-02-12-github-actions-artifacts-v4-is-now-generally-available/),
 [cache scopes and versions](https://docs.github.com/en/actions/reference/workflows-and-actions/dependency-caching),
