@@ -118,8 +118,17 @@ after the workflow has an observed successful gameplay result.
   buffer-boundary commits do not change the captured 3D/R8 instruction.
 - Test profile: copied locally into the candidate's portable `user` directory;
   configuration NAND, SDMC, load, and dump paths were rewritten to that directory.
-  Shader caches were not copied. The original application was left running;
-  its live save snapshot is not an atomic shutdown snapshot.
+  Shader caches were not copied. The user then closed the original normally;
+  its log confirmed emulation cleanup. Refreshed the candidate save after that
+  cleanup and verified its SHA-256 against the original. Preserved the complete
+  stock Build 150 session log locally.
+- Diagnostic profile: disabled update checks to keep the candidate revision
+  fixed. Rendering settings remain those of the baseline. Existing local
+  Streamline, FidelityFX, and Lossless support files were copied into the profile.
+- Control bridge: all 16 existing `tools/nx2/test_debug_mcp.py` tests passed on
+  local Python 3.13.0. These use a fake server and establish adapter behavior,
+  not actual game rendering or input delivery. The real candidate must still
+  exercise screenshots and `input`/`input_sequence` through its debug server.
 
 The independent reviewer audits progress every 15 minutes and checks that work
 continues toward an observed gameplay result. Its first audit prioritized the
