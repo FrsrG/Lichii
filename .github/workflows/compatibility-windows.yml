@@ -36,6 +36,11 @@ jobs:
 
       - name: Set up MSVC
         uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756
+        with:
+          arch: x64
+          vsversion: '2022'
+          toolset: '14.44'
+          sdk: '10.0.26100.0'
 
       # The release job's compiler; ThinLTO is left to the release build to keep this job short.
       - name: Install LLVM
@@ -67,6 +72,24 @@ jobs:
         shell: pwsh
         run: ./tools/windows/install-vulkan-sdk.ps1
 
+      - name: Verify compiler and SDK identities
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $clang = & "$env:LLVM_ROOT/bin/clang-cl.exe" --version
+          if ($LASTEXITCODE -ne 0 -or "$clang" -notmatch 'clang version 22\.1\.8\b') { throw 'Unexpected clang-cl' }
+          if ($env:WindowsSDKVersion.TrimEnd('\') -ne '10.0.26100.0') { throw 'Unexpected Windows SDK' }
+          if ($env:VCToolsVersion -notlike '14.44.*') { throw 'Unexpected MSVC toolset' }
+          if ($env:VULKAN_SDK.Replace('\', '/').TrimEnd('/') -ne 'C:/VulkanSDK/1.4.341.1') { throw 'Unexpected Vulkan SDK' }
+          $spirv = & "$env:VULKAN_SDK/Bin/spirv-val.exe" --version
+          if ($LASTEXITCODE -ne 0) { throw 'Vulkan SDK validator does not run' }
+          $qt = & qmake -query QT_VERSION
+          if ($LASTEXITCODE -ne 0 -or $qt -ne '6.8.3') { throw 'Unexpected Qt version' }
+          New-Item -ItemType Directory -Path build -Force | Out-Null
+          @{clang = $clang; windows_sdk = $env:WindowsSDKVersion; msvc = $env:VCToolsVersion;
+            vulkan_sdk = $env:VULKAN_SDK; spirv_validator = $spirv; qt = $qt; lto = $false} |
+            ConvertTo-Json -Depth 4 | Set-Content build/compatibility-toolchain.json
+
       # Restore and save separately so a test failure still keeps the compiled objects.
       - name: Restore dependencies and compiler objects
         uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25
@@ -74,8 +97,9 @@ jobs:
           path: |
             .cache/cpm
             .ccache
-          key: clang-cl-ccache-qt683-${{ runner.os }}-${{ github.sha }}
+          key: clang-cl-ccache-qt683-${{ runner.os }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
+            clang-cl-ccache-qt683-${{ runner.os }}-${{ github.sha }}
             clang-cl-ccache-qt683-${{ runner.os }}-
 
       - name: Configure production and tests
@@ -89,6 +113,8 @@ jobs:
           "-DCMAKE_C_FLAGS=-DWIN32 -D_WINDOWS -DNOMINMAX"
           "-DCMAKE_CXX_FLAGS=-DWIN32 -D_WINDOWS -EHsc -DNOMINMAX"
           -DENABLE_DEBUG_TOOLS=ON -DENABLE_WERROR=ON
+          -DENABLE_LTO=OFF
+          -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=OFF
           -DBUILD_TESTING=ON
           -DYUZU_TESTS=ON
           -DENABLE_QT=ON
@@ -104,22 +130,61 @@ jobs:
 
       # The install script pins clang-cl by checksum, so it identifies the compiler without hashing
       # the binary on every call.
-      - name: Build production and tests
-        id: compile
+      - name: Build provisional runtime and replay tools
+        id: provisional_compile
+        env:
+          CCACHE_COMPILERCHECK: string:${{ hashFiles('tools/windows/install-llvm.ps1') }}
+        run: |
+          ccache --zero-stats
+          cmake --build build --target yuzu yuzu-cmd shader-sweep --parallel
+
+      - name: Report provisional compiler cache statistics
+        if: always() && steps.provisional_compile.outcome != 'skipped'
+        run: |
+          mkdir -p build/compatibility-metrics
+          ccache --print-stats --format=json > build/compatibility-metrics/provisional-ccache.json
+          ccache --show-stats -v | tee build/compatibility-metrics/provisional-ccache.txt
+
+      - name: Package PROVISIONAL runtime
+        id: provisional_package
+        if: always() && steps.provisional_compile.outcome == 'success'
+        shell: pwsh
+        run: |
+          windeployqt --release --no-translations build/bin/lichii.exe
+          if ($LASTEXITCODE -ne 0) { throw 'windeployqt failed' }
+          Copy-Item -LiteralPath "$env:VULKAN_SDK/Bin/spirv-val.exe" -Destination build/bin/
+          ./tools/windows/write-compatibility-provenance.ps1 -Stage provisional
+
+      - name: Upload PROVISIONAL Windows package
+        if: always() && steps.provisional_package.outcome == 'success'
+        uses: actions/upload-artifact@v7
+        with:
+          name: lichii-build150-yoshi-windows-PROVISIONAL-${{ github.sha }}-${{ github.run_attempt }}
+          path: build/bin/
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: Build ALL milestone targets
+        id: full_compile
+        if: always() && steps.provisional_compile.outcome == 'success'
         env:
           CCACHE_COMPILERCHECK: string:${{ hashFiles('tools/windows/install-llvm.ps1') }}
         run: |
           ccache --zero-stats
           cmake --build build --parallel
 
-      - name: Report compiler cache statistics
-        if: always() && steps.compile.outcome != 'skipped'
+      - name: Report full-build compiler cache statistics
+        if: always() && steps.full_compile.outcome != 'skipped'
         run: |
-          ccache --show-stats -v
+          mkdir -p build/compatibility-metrics
+          ccache --print-stats --format=json > build/compatibility-metrics/full-ccache.json
+          ccache --show-stats -v | tee build/compatibility-metrics/full-ccache.txt
 
       # Windows may refuse to load the unsigned nxformat.dll (Smart App Control, code integrity
       # policies), so lichii.exe must not import it at startup: only a delay import is allowed.
       - name: Check nxformat.dll is delay-loaded
+        id: imports
+        if: always() && steps.full_compile.outcome == 'success'
         run: |
           imports=$("$LLVM_ROOT/bin/llvm-readobj" --coff-imports build/bin/lichii.exe |
             awk '/^(Import|DelayImport) {/ { kind = $1 } /^  Name:/ { print kind, $2 }')
@@ -130,7 +195,27 @@ jobs:
           fi
 
       - name: Run tests
-        run: ctest --test-dir build --output-on-failure --no-tests=error --parallel "$NUMBER_OF_PROCESSORS"
+        id: tests
+        if: always() && steps.full_compile.outcome == 'success'
+        run: >-
+          ctest --test-dir build --output-on-failure --no-tests=error
+          --parallel "$NUMBER_OF_PROCESSORS"
+          --output-junit "$GITHUB_WORKSPACE/build/compatibility-tests.xml"
+
+      - name: Mark runtime VALIDATED
+        id: validated_package
+        if: always() && steps.full_compile.outcome == 'success' && steps.imports.outcome == 'success' && steps.tests.outcome == 'success' && steps.provisional_package.outcome == 'success'
+        shell: pwsh
+        run: ./tools/windows/write-compatibility-provenance.ps1 -Stage validated
+
+      - name: Upload VALIDATED Windows package
+        if: always() && steps.validated_package.outcome == 'success'
+        uses: actions/upload-artifact@v7
+        with:
+          name: lichii-build150-yoshi-windows-VALIDATED-${{ github.sha }}-${{ github.run_attempt }}
+          path: build/bin/
+          retention-days: 14
+          if-no-files-found: error
 
       - name: Save dependencies and compiler objects
         if: always()
@@ -139,34 +224,16 @@ jobs:
           path: |
             .cache/cpm
             .ccache
-          key: clang-cl-ccache-qt683-${{ runner.os }}-${{ github.sha }}
-
-      - name: Package local test build
-        id: package
-        if: always() && steps.compile.outcome == 'success'
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          windeployqt --release --no-translations build/bin/lichii.exe
-          if ($LASTEXITCODE -ne 0) { throw 'windeployqt failed' }
-          Copy-Item -LiteralPath "$env:VULKAN_SDK/Bin/spirv-val.exe" -Destination build/bin/
-          git rev-parse HEAD | Set-Content build/bin/SOURCE_COMMIT.txt
-          "Build 150 derivative for compatibility validation; gameplay unverified." |
-            Set-Content build/bin/COMPATIBILITY_BUILD.txt
-
-      - name: Upload Windows test package
-        if: always() && steps.package.outcome == 'success'
-        uses: actions/upload-artifact@v7
-        with:
-          name: lichii-build150-yoshi-windows-${{ github.sha }}
-          path: build/bin/
-          retention-days: 14
-          if-no-files-found: error
+          key: clang-cl-ccache-qt683-${{ runner.os }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: compatibility-test-results-${{ github.sha }}
-          path: build/Testing/
+          name: compatibility-test-results-${{ github.sha }}-${{ github.run_attempt }}
+          path: |
+            build/Testing/
+            build/compatibility-tests.xml
+            build/compatibility-metrics/
+            build/compatibility-toolchain.json
           retention-days: 14

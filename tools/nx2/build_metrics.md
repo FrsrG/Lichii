@@ -151,6 +151,43 @@ leave evidence. Ccache 4.14.2 supports JSON through `--print-stats --format=json
 
 ## Changes justified for future workflows
 
+The repaired run [42920122983](https://github.com/FrsrG/Lichii/actions/runs/42920122983)
+completed successfully on source `2a4c1797be541e5d15c48b9a0dc426bf141152a0`.
+Its combined compile/link step took 83 s, CTest 50 s, cache restore 11 s, cache
+save 8 s, package 1 s and artifact uploads 11 s. It restored the first run's
+branch-scoped archive and reported 1,987 direct hits / 1,999 cacheable calls
+(99.40%), 12 misses and 37 uncacheable calls. The reported object cache occupied
+13.11% of its 1 GB limit. Its new combined archive was 287,316,759 bytes.
+
+Those measurements support keeping the current cache layout and 1 GB limit.
+A split cache is deferred: the transfer cost is small, reuse is already high,
+and changing paths would invalidate compatibility with the saved combined
+archive unless a legacy restore first seeds the new directories.
+
+The proposed `compatibility-windows.yml` sequence builds and uploads a
+`PROVISIONAL` runtime before building all default targets and running the full
+existing CTest/import checks. A distinct `VALIDATED` artifact is produced only
+after those checks pass. `COMPATIBILITY_PROVENANCE.json` retains source commit,
+run/attempt, verified tool identities and SHA-256 hashes of the runtime files at
+both stages. A changed runtime hash is recorded rather than hidden. Neither
+artifact claims gameplay validation. Immutable cache save keys add run/attempt
+suffixes while retaining the old cached paths and compatible restore prefixes.
+
+`tools/windows/write-compatibility-provenance.ps1` rejects zero/all-skipped or
+failed JUnit reports, stale reports and a workflow/checkout SHA mismatch. Run its
+lightweight fixture checks with:
+
+```powershell
+python tools/windows/test_compatibility_provenance.py
+```
+
+The workflow change has only been parsed and checked locally; its package-state
+tests use non-executable temporary fixtures. Compiler/SDK verification, Qt
+deployment and the two-stage artifact flow still require an approved future CI
+run. No time saving for that new flow has been measured or promised. Do not push
+the workflow onto the active compatibility branch until its current run ends:
+the existing branch concurrency policy cancels an older run on a new push.
+
 1. Build selected emulator/replay targets and upload a clearly provisional
    package first, then retain the complete build and CTest checks in the same
    source/configuration/build directory. GitHub artifacts are downloadable after
