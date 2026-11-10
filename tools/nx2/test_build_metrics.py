@@ -24,6 +24,13 @@ class BuildMetricsTests(unittest.TestCase):
         self.assertNotIn("compile_and_link", result["completed_phase_seconds"])
         self.assertIsNone(result["peak_memory_bytes"])
 
+    def test_skipped_tests_are_not_reported_as_zero_second_validation(self):
+        job = {"steps": [{"name": "Run tests", "status": "completed", "conclusion": "skipped",
+                          "started_at": "2026-11-10T22:58:33Z", "completed_at": "2026-11-10T22:58:33Z"}]}
+        result = build_metrics.report(job)
+        self.assertIsNone(result["steps"][0]["seconds"])
+        self.assertNotIn("tests", result["completed_phase_seconds"])
+
     def test_real_ccache_format_preserves_unknown_counters(self):
         result = build_metrics.parse_log("""2026-11-10T22:26:24.6Z Cacheable calls: 1990 / 2027 (98.17%)
 2026-11-10T22:26:24.6Z   Hits: 1556 / 1990 (78.19%)
@@ -43,15 +50,15 @@ class BuildMetricsTests(unittest.TestCase):
     def test_noop_does_not_invent_cache_hits(self):
         result = build_metrics.parse_log("ninja: no work to do.\n")
         self.assertEqual(result["ccache_reports"], [])
-        self.assertEqual(result["ninja"]["observed_compile_completions"], 0)
+        self.assertEqual(result["ninja"]["observed_compile_commands"], 0)
 
     def test_interleaved_ninja_completions_are_counted_not_timed(self):
         result = build_metrics.parse_log("""2026-11-10T22:01:01.0Z [1/3] Building CXX object a.obj
 2026-11-10T22:01:02.0Z [2/3] Linking CXX static library a.lib
 2026-11-10T22:01:03.0Z [3/3] Building RC object b.res
 """)
-        self.assertEqual(result["ninja"]["observed_compile_completions"], 2)
-        self.assertEqual(result["ninja"]["observed_link_completions"], 1)
+        self.assertEqual(result["ninja"]["observed_compile_commands"], 2)
+        self.assertEqual(result["ninja"]["observed_link_commands"], 1)
         self.assertEqual(result["ninja"]["last_progress"], {"completed": 3, "total": 3})
 
 

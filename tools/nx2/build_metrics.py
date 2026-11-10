@@ -81,8 +81,8 @@ def parse_log(text):
         "ccache_reports": blocks,
         "cache_events": cache_events,
         "ninja": {
-            "observed_compile_completions": sum(bool(re.match(r"Building (?:CXX|C|ASM|RC) object\b", x["action"])) for x in ninja),
-            "observed_link_completions": sum(x["action"].startswith("Linking ") for x in ninja),
+            "observed_compile_commands": sum(bool(re.match(r"Building (?:CXX|C|ASM|RC) object\b", x["action"])) for x in ninja),
+            "observed_link_commands": sum(x["action"].startswith("Linking ") for x in ninja),
             "last_progress": {k: ninja[-1][k] for k in ("completed", "total")} if ninja else None,
         },
     }
@@ -93,7 +93,8 @@ def report(job, log="", run=None, case="unknown", as_of=None):
     steps, totals = [], {}
     for step in job.get("steps", []):
         start, end = timestamp(step.get("started_at")), timestamp(step.get("completed_at"))
-        seconds = (end - start).total_seconds() if start and end else None
+        skipped = step.get("conclusion") == "skipped"
+        seconds = (end - start).total_seconds() if start and end and not skipped else None
         group = phase(step["name"])
         if seconds is not None:
             totals[group] = totals.get(group, 0) + seconds
