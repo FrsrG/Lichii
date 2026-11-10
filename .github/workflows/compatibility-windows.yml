@@ -105,11 +105,16 @@ jobs:
       # The install script pins clang-cl by checksum, so it identifies the compiler without hashing
       # the binary on every call.
       - name: Build production and tests
+        id: compile
         env:
           CCACHE_COMPILERCHECK: string:${{ hashFiles('tools/windows/install-llvm.ps1') }}
         run: |
           ccache --zero-stats
           cmake --build build --parallel
+
+      - name: Report compiler cache statistics
+        if: always() && steps.compile.outcome != 'skipped'
+        run: |
           ccache --show-stats -v
 
       # Windows may refuse to load the unsigned nxformat.dll (Smart App Control, code integrity
@@ -137,6 +142,8 @@ jobs:
           key: clang-cl-ccache-qt683-${{ runner.os }}-${{ github.sha }}
 
       - name: Package local test build
+        id: package
+        if: always() && steps.compile.outcome == 'success'
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -147,6 +154,7 @@ jobs:
             Set-Content build/bin/COMPATIBILITY_BUILD.txt
 
       - name: Upload Windows test package
+        if: always() && steps.package.outcome == 'success'
         uses: actions/upload-artifact@v7
         with:
           name: lichii-build150-yoshi-windows-${{ github.sha }}
