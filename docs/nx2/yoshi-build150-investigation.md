@@ -99,3 +99,29 @@ after the workflow has an observed successful gameplay result.
 
 - Baseline: preserved Build 138 and Build 150 sessions; identified four concrete
   rejected shader forms; created the FrsrG fork. Gameplay is still unverified.
+- Attributed ports: imported `4c5f45332`, `39ff782b8`, `6333b09c7`, and
+  `34d4acdd4` from PR #1189 with original authors and source references. Removed
+  the unrelated IMAD addend-negation hunk from the final implementation.
+- Review fixes (`db65715f3`): protected all three 3D reduction coordinates from
+  lowering scratch and register-shadow collisions; tracked reverse-encoded LDG
+  load predicates in geometry exit liveness. Added range and lifetime tests.
+- Captured fixtures (`29b997409`): positive lowering tests use all four exact
+  instruction sequences from this PC's Build 150 log. The geometry fixture
+  keeps exit state live during the captured attribute load.
+- Additional review (`5d8bc9389`): the Maxwell translator's `MakeCoords` reads one
+  coordinate for buffers. Matched that count in reduction range checks and
+  register metadata, with a boundary regression test, to retain valid R245
+  buffer-coordinate programs.
+- First Windows candidate: source `db65715f3401ba2cd0ecda91f677e06ff6e20e85`,
+  [build run](https://github.com/FrsrG/Lichii/actions/runs/42910339018).
+  Compilation/test result and gameplay result are pending. Later test and
+  buffer-boundary commits do not change the captured 3D/R8 instruction.
+- Test profile: copied locally into the candidate's portable `user` directory;
+  configuration NAND, SDMC, load, and dump paths were rewritten to that directory.
+  Shader caches were not copied. The original application was left running;
+  its live save snapshot is not an atomic shutdown snapshot.
+
+The independent reviewer audits progress every 15 minutes and checks that work
+continues toward an observed gameplay result. Its first audit prioritized the
+Windows package, exact captured-instruction coverage, and avoiding unrelated
+tooling work. It identified the buffer-coordinate boundary regression above.
