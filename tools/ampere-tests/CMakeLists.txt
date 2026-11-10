@@ -10,6 +10,7 @@ get_filename_component(REPOSITORY_ROOT "${CMAKE_CURRENT_LIST_DIR}/../.." ABSOLUT
 file(READ "${REPOSITORY_ROOT}/cpmfile.json" dependency_pins)
 foreach(field repo version hash)
     string(JSON catch2_${field} GET "${dependency_pins}" catch2 ${field})
+    string(JSON fmt_${field} GET "${dependency_pins}" fmt ${field})
 endforeach()
 
 include(FetchContent)
@@ -20,16 +21,22 @@ FetchContent_Declare(Catch2
     URL "https://github.com/${catch2_repo}/archive/${catch2_version}.tar.gz"
     URL_HASH "SHA512=${catch2_hash}"
     DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
-FetchContent_MakeAvailable(Catch2)
+set(FMT_INSTALL OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(fmt
+    URL "https://github.com/${fmt_repo}/archive/${fmt_version}.tar.gz"
+    URL_HASH "SHA512=${fmt_hash}"
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
+FetchContent_MakeAvailable(Catch2 fmt)
 
 add_executable(ampere-quick-tests
     main.cpp
     "${REPOSITORY_ROOT}/src/tests/video_core/ampere_yoshi_compute.cpp"
+    "${REPOSITORY_ROOT}/src/tests/video_core/ampere_yoshi_imad.cpp"
     "${REPOSITORY_ROOT}/src/tests/video_core/ampere_geometry_exit.cpp"
     "${REPOSITORY_ROOT}/src/tests/video_core/ampere_compute_lowering.cpp")
 target_compile_features(ampere-quick-tests PRIVATE cxx_std_20)
 target_include_directories(ampere-quick-tests PRIVATE "${REPOSITORY_ROOT}/src")
-target_link_libraries(ampere-quick-tests PRIVATE Catch2::Catch2)
+target_link_libraries(ampere-quick-tests PRIVATE Catch2::Catch2 fmt::fmt-header-only)
 
 enable_testing()
 add_test(NAME ampere-lowering COMMAND ampere-quick-tests)

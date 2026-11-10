@@ -1,8 +1,9 @@
 # Ampere lowering quick tests
 
 This standalone target compiles the existing Yoshi compute, geometry-exit and compute-lowering
-tests against the production Ampere headers. It fetches only Catch2, using the version and
-SHA-512 from the repository's `cpmfile.json`. It does not configure the emulator or link Qt,
+tests against the production Ampere headers. It fetches Catch2 and header-only fmt, using the
+versions and SHA-512 hashes from the repository's `cpmfile.json`. The fmt headers are needed
+by the real trap-guard evaluator. It does not configure the emulator or link Qt,
 audio, networking, Vulkan, the shader backend or the emulator core.
 
 Requirements: CMake 3.24 or newer, a C++20 compiler and its standard library, and a build tool
