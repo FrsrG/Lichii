@@ -105,6 +105,7 @@ jobs:
       # The install script pins clang-cl by checksum, so it identifies the compiler without hashing
       # the binary on every call.
       - name: Build production and tests
+        id: compile
         env:
           CCACHE_COMPILERCHECK: string:${{ hashFiles('tools/windows/install-llvm.ps1') }}
         run: |
@@ -137,16 +138,20 @@ jobs:
           key: clang-cl-ccache-qt683-${{ runner.os }}-${{ github.sha }}
 
       - name: Package local test build
+        id: package
+        if: always() && steps.compile.outcome == 'success'
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           windeployqt --release --no-translations build/bin/lichii.exe
           if ($LASTEXITCODE -ne 0) { throw 'windeployqt failed' }
+          Copy-Item -LiteralPath "$env:VULKAN_SDK/Bin/spirv-val.exe" -Destination build/bin/
           git rev-parse HEAD | Set-Content build/bin/SOURCE_COMMIT.txt
           "Build 150 derivative for compatibility validation; gameplay unverified." |
             Set-Content build/bin/COMPATIBILITY_BUILD.txt
 
       - name: Upload Windows test package
+        if: always() && steps.package.outcome == 'success'
         uses: actions/upload-artifact@v7
         with:
           name: lichii-build150-yoshi-windows-${{ github.sha }}
