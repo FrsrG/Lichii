@@ -1,5 +1,23 @@
 # Yoshi and the Mysterious Book: Build 150 investigation
 
+## Observed result
+
+The post-intro black world is fixed in the tested Build 150 derivative. The first
+candidate rendered the formerly black dialogue scene and supported a roughly
+28-minute session of first-level exploration; the owner reported that level one
+worked perfectly. The final candidate loaded the preserved 11-star save,
+re-entered the habitat, rendered movement and jumping, picked up a creature with
+the tail-flick input, and returned to the book through End Exploration.
+
+The gameplay executable was built from
+`9d71cf868a14d6217442702ddb53a3f47626580d`, SHA-256
+`4E03A46D307C67869AC41FD590A3D653DA16CBDC625400265F1AF3AF610BAD15`.
+[Its Windows milestone run](https://github.com/FrsrG/Lichii/actions/runs/42926072741)
+passed all targets, the delay-import check and 10/10 CTest entries. The tested
+early package and the later validated package have identical runtime hashes.
+This establishes observed first-level play on the recorded NVIDIA/Windows host,
+not full-game completion or compatibility on every GPU.
+
 ## Objective and baseline
 
 Make the full game (program ID `0400245021D2C000`, version 1.0.2) render and reach
@@ -21,7 +39,7 @@ have been observed. Compilation and shader validation are separate gates.
 
 ## Evidence ledger (2026-11-10)
 
-The current log identifies `nx2-build-150` and boots the full game's program ID.
+The baseline log identifies `nx2-build-150` and boots the full game's program ID.
 The older rotated log identifies Build 138; keep these sessions distinct.
 
 | Build 150 elapsed time | Observed rejection | Interpretation |
@@ -31,13 +49,14 @@ The older rotated log identifies Build 138; keep these sessions distinct.
 | 72.504 s | compute op `364`, `02101364 38000010 001e0f12 00014200`: unsupported native opcode | Register-handle bindless gather is missing. |
 | 72.562 s | compute op `59f`, `0800759f a0c00201 0310e000 000fe200`: native surface reduction mode | A 3D surface reduction is rejected. |
 
-These are direct local observations. Their contribution to the final black
-image remains a hypothesis until a before/after frame comparison. The log
+These are direct local observations. At baseline their contribution to the black
+image was a hypothesis; later screenshots establish the before/after change. The log
 continues presenting frames, consistent with the user's live dialogue and FPS.
 Missing avatar and optional Streamline low-latency DLL warnings are not evidence
 that they cause the missing 3D world.
 
-The current process has no listening debug server. It was left running.
+The original process had no listening debug server. Later candidates enabled
+the opt-in server in separate portable profiles.
 
 ## Existing work and attribution
 
@@ -76,7 +95,7 @@ The current process has no listening debug server. It was left running.
    correlate native shader hashes, inspect resources/depth/blend state, and
    compare with an uncaptured run before ruling out synchronization defects.
 8. Verify first-level movement, interactions, transitions, save/reload, and a
-   sustained run. Check another game sharing changed instruction forms before
+   sustained run. Where available, check another game sharing changed instruction forms before
    preparing a focused upstream PR with measured results and limitations.
 
 ## Reusable workflow notes
@@ -188,3 +207,125 @@ gaps were 372 ms and 451 ms. Short spikes may be missed, and private allocation
 is not physical RAM usage. Four jobs is justified for this small target; no
 full-emulator parallelism optimum is established. Raw logs and provenance stay
 under the local investigation's `benchmarks/ampere-ccache-msvc-20261110` folder.
+
+## Gameplay and final validation
+
+The repaired first candidate (`2a4c1797b`) reached the original black dialogue
+scene with the book, Yoshis and surrounding world visible. Native debug-server
+screenshots also show first-page entry, a jump and the creature knowledge page.
+The owner then took control and played; subsequent input was observational only.
+That approximately 28-minute session is mixed/manual evidence, not a deterministic
+agent-only playthrough. The final pause screen showed 11 stars and 91 tokens;
+the subsequently loaded save showed 11 stars and 38 tokens, so do not claim that
+all transient token counts persisted. Save bytes were copied after normal exit.
+
+At 561.675 seconds that first candidate encountered three previously hidden
+IMAD `624` instructions. No corresponding new visible defect was identified:
+
+```
+ff117624 81000400 078e02ff 000fe200
+ff0cb624 81000400 078e02ff 000fe400
+ff04c624 81000400 078e02ff 000fe200
+```
+
+These justified restoring the previously deferred IMAD addend-negation hunk from
+`4c5f45332`, then porting `53268eca4` (zero-product semantics) and `a1816fd27`
+(trap-guard evaluator), preserving cerroverb's authorship. Five independent
+semantic tests cover the exact words, predicates, wraparound arithmetic, register
+aliasing, unsupported ABS and the real evaluator. Integrated standalone checks
+pass 34 cases / 4,381 assertions and 2/2 CTest entries. The final persistent local
+Ninja run measured 0.094 s with no compiler calls for a no-op, and 0.332 s with
+5/5 direct cache hits for forced unchanged compilation.
+
+The final executable started from an empty shader cache in its own portable
+profile, with the completed first session's save verified by SHA-256. The agent
+controlled this final check through frame-timed debug inputs. It observed title
+and user selection, loaded the 11-star progress, entered the habitat, moved right,
+jumped, picked up the creature with X, selected End Exploration and returned to
+the rendered book, then entered the habitat again. Screenshots 002 through 014
+and the exact debug-call records remain local. The three later IMAD native hashes
+were captured in this session, establishing that those programs were encountered.
+
+A ten-second gameplay sample recorded 588 frames, 58.82 FPS, mean 17.00 ms,
+p99 20.88 ms, maximum 27.63 ms and zero reported stutters. The completed final
+log contains no native graphics/compute shader rejections, PANIC or device-loss
+lines. It records requested shutdown at 457.569 s and completed cleanup at
+464.079 s. Its SHA-256 is
+`0831375176918835A3FC5E5E27214CD87D40BF8F3474E5608EE4FA0380BC3840`.
+The completed save is preserved separately. The earlier candidate's guest PANIC
+occurred after requested shutdown and forced emulation-thread stop; it is a
+shutdown-time observation, not evidence of a normal-gameplay crash.
+
+Do not use `status.rejected: []` to assert compiler success: that field describes
+hashes deliberately disabled through debug controls. The rejection result above
+comes from searching the complete fresh log for actual native failure messages.
+
+Offline final-source replay used five captured native programs with their actual
+stage/header/resource context plus five whole production-v2 pipeline records.
+All 10 jobs compiled and all 13 emitted modules passed
+`spirv-val --target-env vulkan1.2`: compute 6, fragment 3, geometry 2, vertex 2.
+The validator was SPIRV-Tools v2026.1-0-gfbe4f3ad, SHA-256
+`14b9820bcdcfea88b0e0db5688c2fd5fe87b957497e689f3bbf535bbd0400979`;
+the replay compiler SHA-256 was
+`fea8a51fd18baab9bb6a712e0d8b01b0060065164855cfab83ed4fcbc7dd65be`.
+Commands, module hashes and resource context remain local. The earlier cache
+lacked environments for the three rejected IMAD programs; that was recorded as
+missing context rather than fabricating bindings or claiming full-program replay.
+
+After clean final shutdown, the three IMAD native hashes matched exact Program
+records and real compute environments in the final cache. Their three native
+and three production-v2 pipeline jobs also compiled and all six emitted compute
+modules passed the same validator. Combined results are therefore 16/16 replay
+jobs and 19/19 validated modules: compute 12, fragment 3, geometry 2, vertex 2.
+This closes the earlier context gap without invented bindings. Cache snapshots
+had two identical reads, stable metadata and valid record-header CRCs; outer
+XXH3 payload hashes were not independently verified. Production-v2 payload
+structure checks passed. Exact commands and context remain local in the final
+session's `offline-imad-replay/validation-results.json`.
+
+## Exercised two-stage build workflow and reusable skill
+
+[Run 42926072741](https://github.com/FrsrG/Lichii/actions/runs/42926072741)
+tested the new loop, retaining complete validation after the early package:
+
+| Phase | Time |
+| --- | ---: |
+| Setup, including separately unmeasured internal tool-installer transfers | 183 s |
+| Object/dependency cache restore | 11 s |
+| Configure | 49 s |
+| Selected runtime and replay-tool compile/link | 100 s |
+| Provisional package / upload | 1 s / 9 s |
+| Remaining complete milestone compile/link | 87 s |
+| Complete CTest | 51 s, 10/10 passed |
+| Validated package upload | 11 s |
+| Object/dependency cache save | 9 s |
+
+The early upload finished at 23:52:15 UTC, approximately 150 seconds before the
+validated upload. This reduces time to begin gameplay checks; it does not claim
+the total build became faster. The new source and tests differ from the earlier
+83-second repaired build. Compile and link were interleaved, so separate wall
+times and full-emulator peak memory remain unmeasured. Provisional cache calls
+had 1,634 direct hits / 1,652 cacheable calls (98.91%), 18 misses and 37
+uncacheable calls; the remaining build had 310/348 direct hits and 38 misses.
+Final object-cache use was 14.80% of 1 GB. There is no measured justification
+for splitting or enlarging the working cache during this investigation.
+
+The focused contribution branch retains byte-identical `src`, replay link and
+quick-test implementation from the validated source, with explanatory docs added.
+Fork-specific CI and larger benchmark tooling stay on the milestone branch.
+PR #1189 remained open/unmerged when rechecked; the contribution explicitly
+credits its inherited implementation and identifies the extra safety fixes,
+regressions and observed gameplay evidence.
+
+The installed `lichii-compatibility` skill records diagnosis, context-preserving
+replay, the measured fast loop, actual gameplay gates, attribution and provenance.
+Its independent read-only forward-test caught the distinction between deliberate
+hash rejection and compiler failures, and between compile-only replay and SPIR-V
+validation. The resulting refinement also correlates PANIC messages with shutdown
+timestamps. Skill validation passed after these changes. Public source changes
+exclude game files, private keys, firmware, saves, logs, caches and screenshots.
+
+Submitted [upstream PR #1284](https://github.com/zortos293/Lichii/pull/1284) from
+`contribution/yoshi-build150`. GitHub reports the open contribution mergeable;
+maintainer review/merge remains upstream's decision. Source/test/link identity
+was independently reviewed against the validated gameplay revision.

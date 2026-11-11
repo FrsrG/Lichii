@@ -7,7 +7,7 @@ by the real trap-guard evaluator. It does not configure the emulator or link Qt,
 audio, networking, Vulkan, the shader backend or the emulator core.
 
 Requirements: CMake 3.24 or newer, a C++20 compiler and its standard library, and a build tool
-such as Ninja or MSBuild. The first configure needs access to the pinned Catch2 archive.
+such as Ninja or MSBuild. The first configure needs access to the pinned Catch2 and fmt archives.
 Windows requires a Visual Studio C++ developer environment (compiler, Windows SDK and C++
 standard library); clang-cl can use that same environment. No Python is required.
 
