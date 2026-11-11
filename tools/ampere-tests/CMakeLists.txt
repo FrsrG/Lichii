@@ -32,6 +32,7 @@ add_executable(ampere-quick-tests
     main.cpp
     "${REPOSITORY_ROOT}/src/tests/video_core/ampere_yoshi_compute.cpp"
     "${REPOSITORY_ROOT}/src/tests/video_core/ampere_yoshi_imad.cpp"
+    "${REPOSITORY_ROOT}/src/tests/video_core/ampere_kirby_fsel.cpp"
     "${REPOSITORY_ROOT}/src/tests/video_core/ampere_geometry_exit.cpp"
     "${REPOSITORY_ROOT}/src/tests/video_core/ampere_geometry.cpp"
     "${REPOSITORY_ROOT}/src/tests/video_core/ampere_compute_lowering.cpp")

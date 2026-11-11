@@ -54,6 +54,7 @@ inline RegisterPressure PrepareRegisterPressure(const Instruction& input, u32 re
         break;
     case 0x807:
     case 0x808:
+    case 0xc08: // FSEL: B is uniform, only Rd and Ra are ordinary registers.
     case 0x923:
     case 0x820:
     case 0xa20:

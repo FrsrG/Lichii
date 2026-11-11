@@ -77,7 +77,7 @@ inline LoweredProgram LowerToMaxwellWith(std::span<const Instruction> code, u32 
         uses_uniform_bank |= op == 0x987 ||
             ((op == 0x387 || op == 0x983) && instruction.Bits(91, 1));
         uses_uniform_bank |= op == 0x3c4 || op == 0x2bd || op == 0x896 || op == 0xf60 || op == 0xc11 || op == 0xd08 || op == 0xc0c || op == 0x986 || op == 0x9a8 || op == 0xc12 || op == 0xc17 || op == 0xe24 || op == 0xc24 || op == 0xd00 || op == 0xd09 || op == 0x9c3 || op == 0xc45 || op == 0x2a4 || op == 0x891 || op == 0x890 || op == 0x290 || op == 0x28c || op == 0x88c || op == 0x287 || op == 0x887 || op == 0x958 || op == 0xab9 || op == 0xabb || op == 0x899 || op == 0xc20 || op == 0xe21 || op == 0xe23 || op == 0xc02 ||
-                             op == 0x886 || op == 0x3c2 || op == 0xc82 || op == 0x882 || op == 0x292 || op == 0x892 || op == 0x291 || op == 0x981 || op == 0xc13 || op == 0xc10 || op == 0xc23 || op == 0x526 || op == 0x2be || op == 0x8a4 || op == 0xd05 || (op == 0x984 && instruction.Bits(91, 1)) || (op == 0x988 && instruction.Bits(91, 1)) || op == 0x89c || op == 0x883 || op == 0x2a5 || op == 0xd06 || op == 0xf63 || op == 0xf66 || op == 0xf69 || op == 0xc0b || op == 0x8a5 || op == 0x299 || op == 0xc09 || op == 0xc07 || (op == 0x81c && instruction.Bits(67, 1)) || op == 0xc0a ||
+                             op == 0x886 || op == 0x3c2 || op == 0xc82 || op == 0x882 || op == 0x292 || op == 0x892 || op == 0x291 || op == 0x981 || op == 0xc13 || op == 0xc10 || op == 0xc23 || op == 0x526 || op == 0x2be || op == 0x8a4 || op == 0xd05 || (op == 0x984 && instruction.Bits(91, 1)) || (op == 0x988 && instruction.Bits(91, 1)) || op == 0x89c || op == 0x883 || op == 0x2a5 || op == 0xd06 || op == 0xf63 || op == 0xf66 || op == 0xf69 || op == 0xc0b || op == 0x8a5 || op == 0x299 || op == 0xc09 || op == 0xc07 || op == 0xc08 || (op == 0x81c && instruction.Bits(67, 1)) || op == 0xc0a ||
                              (op == 0x83b && instruction.Bits(91, 1));
     }
     const auto address_of = [](u32 index) { return 0x50U + index * 8 + ((index + 1) / 3) * 8; };
@@ -118,7 +118,7 @@ inline LoweredProgram LowerToMaxwellWith(std::span<const Instruction> code, u32 
         case 0x202: case 0x802: case 0x803: case 0x424: case 0x724: case 0x824: case 0xe24: case 0x227:
         case 0x810: case 0x819: case 0x845: case 0x906: case 0x820:
         case 0x812: case 0x589:
-        case 0x212: case 0x207: case 0x807: case 0x208: case 0x808:
+        case 0x212: case 0x207: case 0x807: case 0x208: case 0x808: case 0xc08:
         case 0x220: case 0xa20: case 0x221: case 0x421: case 0x621:
         case 0x223: case 0x423: case 0x623: case 0x823: case 0xa23:
         case 0x243: case 0x245: case 0x306:
@@ -3362,7 +3362,7 @@ inline LoweredProgram LowerToMaxwellWith(std::span<const Instruction> code, u32 
             break;
         }
         case 0x207: case 0x807: case 0xa07: case 0xc07:
-        case 0x208: case 0x808: case 0xa08: { // Bitwise SEL / FSEL
+        case 0x208: case 0x808: case 0xa08: case 0xc08: { // Bitwise SEL / FSEL
             // FSEL applies the floating operand modifiers (negate/absolute) before selecting.
             const bool floating = (opcode & 0x1ff) == 0x008;
             const u32 a = operand(0, floating), b = operand(1, floating);
