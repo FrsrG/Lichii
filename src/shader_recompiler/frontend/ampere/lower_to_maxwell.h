@@ -104,7 +104,7 @@ inline LoweredProgram LowerToMaxwellWith(std::span<const Instruction> code, u32 
     std::optional<GeometryExitEnvelope> geometry_exit;
     if (code.front().Bits(0, 12) == 0x34e) {
         if (!geometry_stage) return fail(0, "native program counter load outside geometry stage");
-        geometry_exit = AnalyzeGeometryExit(code);
+        geometry_exit = AnalyzeGeometryExit(code, true);
         if (!*geometry_exit)
             return fail(geometry_exit->error_offset / sizeof(Instruction), geometry_exit->error);
     }
@@ -278,7 +278,8 @@ inline LoweredProgram LowerToMaxwellWith(std::span<const Instruction> code, u32 
         auto insn = code[index];
         result.source_instruction_offsets.push_back(static_cast<u32>(result.instructions.size()));
         if (dead_instructions[index]) continue;
-        if (geometry_exit && (index < GeometryExitSetupInstructions ||
+        // Keep the verified MOV R3, handler: the body may read its original native numeric value.
+        if (geometry_exit && ((index < GeometryExitSetupInstructions && index != 1) ||
             index * sizeof(Instruction) == geometry_exit->handler + sizeof(Instruction)))
             continue;
         u32 opcode = insn.Bits(0, 12);

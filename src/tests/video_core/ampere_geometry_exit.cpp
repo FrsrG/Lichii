@@ -297,6 +297,46 @@ TEST_CASE("Ampere geometry exit body EXITs have no extra modes", "[video_core][a
     code[11].words[0] = 0x0000f94d;
     RequireRejected(code, mode, 0xb0);
 }
+
+TEST_CASE("Ampere geometry lowering preserves the original handler register value",
+          "[video_core][ampere][kirby][preserve_handler]") {
+    constexpr std::string_view reads = "native body reads exit setup state";
+    auto code = Program;
+    code[6] = Instruction{{0x03087923, 0, 0, 0}}; // MOV R8, R3 before any body write to R3.
+    RequireRejected(code, reads, 0x60);
+    const auto preserved = AnalyzeGeometryExit(code, true);
+    INFO(preserved.error << " at " << preserved.error_offset);
+    REQUIRE(preserved);
+    const auto lowered = Shader::Ampere::LowerToMaxwell(code, true);
+    INFO(lowered.error << " at " << lowered.error_offset);
+    REQUIRE(lowered);
+    const auto& offsets = lowered.source_instruction_offsets;
+    REQUIRE(offsets[2] == offsets[1] + 1);
+    const u64 handler_value = lowered.instructions[offsets[1]];
+    CHECK((handler_value & 0xfff0000000000000ULL) == 0x0100000000000000ULL);
+    CHECK((handler_value & 0xff) == 3);
+    CHECK(((handler_value >> 16) & 0xf) == 7);
+    CHECK(((handler_value >> 20) & 0xffffffffU) == code[1].words[1]);
+
+    // Keeping R3 never permits a read of the removed R0/R1/P0 setup results.
+    for (const u32 source : {0U, 1U}) {
+        code = Program;
+        code[5] = Instruction{{0x00087923U | (source << 24), 0, 0, 0}};
+        const auto unsafe = Shader::Ampere::LowerToMaxwell(code, true);
+        REQUIRE_FALSE(unsafe);
+        CHECK(unsafe.error == reads);
+        CHECK(unsafe.error_offset == 0x50);
+    }
+    for (const u32 guard : {0U, 8U}) {
+        code = Program;
+        code[6] = Instruction{{0x03080923U | (guard << 12), 0, 0, 0}};
+        const auto unsafe = Shader::Ampere::LowerToMaxwell(code, true);
+        REQUIRE_FALSE(unsafe);
+        CHECK(unsafe.error == reads);
+        CHECK(unsafe.error_offset == 0x60);
+    }
+}
+
 TEST_CASE("Ampere geometry exit lowering branches body exits to the handler",
           "[video_core][ampere]") {
     const auto lowered = Shader::Ampere::LowerToMaxwell(Program, true);
@@ -306,7 +346,9 @@ TEST_CASE("Ampere geometry exit lowering branches body exits to the handler",
     const auto& offsets = lowered.source_instruction_offsets;
     const auto& code = lowered.instructions;
     REQUIRE(offsets.size() == Program.size());
-    for (size_t index = 0; index < 5; ++index) REQUIRE(offsets[index + 1] == offsets[index]);
+    REQUIRE(offsets[1] == offsets[0]);
+    REQUIRE(offsets[2] == offsets[1] + 1);
+    for (size_t index = 2; index < 5; ++index) REQUIRE(offsets[index + 1] == offsets[index]);
     REQUIRE(offsets[15] == offsets[14]);
     REQUIRE(offsets[15] + 1 == code.size());
 
