@@ -9,7 +9,9 @@
 #include <atomic>
 #include <bit>
 #include <chrono>
+#include <cstdlib>
 #include <cstring>
+#include <fstream>
 #include <limits>
 #include <optional>
 #include <span>
@@ -1137,6 +1139,126 @@ void Maxwell3D::SetHLEReplacementAttributeType(u32 bank, u32 offset,
     replace_table.emplace(key, name);
 }
 
+// A single opt-in failed invocation, not a replay or a second execution. Fixed-size PRE state
+// plus bounded actual callback/DMA traces; successful matching calls reuse these allocations.
+struct FrontMacroFailureCapture {
+    static constexpr size_t MaxEvents = 4096;
+    static constexpr size_t MaxDmaWords = 65536;
+    static constexpr size_t MaxParameters = 4096;
+    struct Event {
+        u32 kind, address, value, count, word_offset, word_count;
+        u64 source;
+    };
+    static_assert(sizeof(Event) == 32);
+    std::vector<u32> code, positions, parameters, dram, regs, shadow, owned, dma_words, jit_state;
+    std::vector<u64> back_regs, back_shadow;
+    std::vector<Event> events;
+    std::array<u32, 8> front_flags{};
+    std::array<u64, 4> front_counters{};
+    u64 code_generation{~u64{0}}, total_events{}, total_dma_words{}, parameter_count{};
+    u32 method{}, start{};
+
+    void Reset() {
+        events.clear();
+        dma_words.clear();
+        jit_state.clear();
+        total_events = total_dma_words = 0;
+        events.reserve(MaxEvents);
+        dma_words.reserve(MaxDmaWords);
+    }
+
+    void Callback(u32 kind, u32 address, u32 value, u32 accepted = 0) {
+        ++total_events;
+        if (events.size() < MaxEvents) {
+            events.push_back({kind, address, value, accepted, 0, 0, 0});
+        }
+    }
+
+    size_t BeginDma(u32 dma_method, u64 source, u32 ram, u32 words) {
+        ++total_events;
+        total_dma_words += words;
+        if (events.size() == MaxEvents) {
+            return 0;
+        }
+        const u32 captured =
+            static_cast<u32>(std::min<size_t>(words, MaxDmaWords - dma_words.size()));
+        events.push_back(
+            {3, dma_method, ram, words, static_cast<u32>(dma_words.size()), captured, source});
+        dma_words.resize(dma_words.size() + captured);
+        return events.size(); // 1-based: zero means the event was dropped.
+    }
+
+    void DmaWord(size_t event, u32 index, u32 value) {
+        if (event != 0 && index < events[event - 1].word_count) {
+            dma_words[events[event - 1].word_offset + index] = value;
+        }
+    }
+
+    void Save(const char* prefix, const TuringMacroInterpreter::Result& result,
+              std::span<const u32> final_dram, size_t final_parameters,
+              u64 final_generation) const {
+        const std::string base =
+            std::string{prefix} + "-" +
+            std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
+        bool ok = true;
+        const auto write = [&](const char* suffix, const auto& values) {
+            const auto bytes = std::as_bytes(std::span{values});
+            std::ofstream file{base + suffix, std::ios::binary};
+            file.write(reinterpret_cast<const char*>(bytes.data()),
+                       static_cast<std::streamsize>(bytes.size()));
+            file.close();
+            ok &= !file.fail();
+        };
+        write(".code", code);
+        write(".positions", positions);
+        write(".parameters", parameters);
+        write(".dram-before", dram);
+        write(".dram-after", final_dram);
+        write(".front-regs", regs);
+        write(".front-shadow", shadow);
+        write(".back-owned", owned);
+        write(".back-regs", back_regs);
+        write(".back-shadow", back_shadow);
+        write(".front-flags", front_flags);
+        write(".front-counters", front_counters);
+        write(".events", events);
+        write(".dma-words", dma_words);
+        write(".jit-state", jit_state);
+        const bool complete = total_events == events.size() &&
+                              total_dma_words == dma_words.size() &&
+                              parameter_count == parameters.size();
+        std::ofstream meta{base + ".txt"};
+        meta << "format=split-front-mme-failure-v1\nbyte_order="
+             << (std::endian::native == std::endian::little ? "little" : "big")
+             << "\nmethod=" << method << "\nstart=" << start
+             << "\ncode_generation_before=" << code_generation
+             << "\ncode_generation_after=" << final_generation
+             << "\nparameter_count_before=" << parameter_count
+             << "\nparameters_captured=" << parameters.size()
+             << "\nparameters_dropped=" << parameter_count - parameters.size()
+             << "\nparameter_count_after=" << final_parameters << "\nconsumed=" << result.consumed
+             << "\nattempted_pc=" << result.pc << "\nerror=" << result.error
+             << "\nattempted_pc_valid=" << (jit_state.empty() || result.error == "instruction limit exceeded")
+             << "\nevents_total=" << total_events << "\nevents_captured=" << events.size()
+             << "\nevents_dropped=" << total_events - events.size()
+             << "\ndma_words_total=" << total_dma_words
+             << "\ndma_words_captured=" << dma_words.size()
+             << "\ndma_words_dropped=" << total_dma_words - dma_words.size()
+             << "\ncallback_trace_complete=" << complete
+             << "\npre_back_owned_registers_may_be_stale=1\nactual_callback_reads_are_"
+                "authoritative=1\n";
+        meta.close();
+        ok &= !meta.fail();
+        if (ok) {
+            LOG_INFO(HW_GPU, "Saved one split-front MME failure to {} (callback trace complete={})",
+                     base, complete);
+        } else {
+            LOG_ERROR(HW_GPU, "Split-front MME failure capture could not write every file at {}",
+                      base);
+        }
+    }
+};
+
 // Split GPU thread with macros on its front half (gpu_split.h, EDEN_NX2_SPLIT=2). The front keeps
 // what macros read: the registers as the back thread will hold them when it reaches the same
 // point of the method stream. That is every write the front sends, with the shadow RAM applied,
@@ -1186,6 +1308,8 @@ struct Maxwell3D::FrontState {
     u64 back_last{};                 ///< The position after the last macro sent to the back
     std::atomic<u32> back_escapes{}; ///< Back macros that wrote outside their write set
     u32 back_escapes_seen{};
+    std::unique_ptr<FrontMacroFailureCapture> failure_capture;
+    bool failure_capture_active{};
 };
 
 namespace {
@@ -1618,8 +1742,7 @@ void Maxwell3D::FrontCallMultiMethod(Core::System& system, VideoCommon::GpuSplit
     }
 }
 
-void Maxwell3D::FrontRunMacro(Core::System& system, VideoCommon::GpuSplit& split,
-                              FrontState& fs) {
+void Maxwell3D::FrontRunMacro(Core::System& system, VideoCommon::GpuSplit& split, FrontState& fs) {
     const u32 method = fs.executing_macro;
     fs.executing_macro = 0;
     auto& engine = GetNativeMacroEngine();
@@ -1630,13 +1753,72 @@ void Maxwell3D::FrontRunMacro(Core::System& system, VideoCommon::GpuSplit& split
         VideoCommon::Nx2Profile::Scope profile_scope{VideoCommon::Nx2Profile::Zone::Macro};
         engine.native_interpreter.active_dram = &native_data_ram;
         const auto parameter_count = fs.parameters.size();
-        const auto read = [&](u32 address) {
-            if (address >= Regs::NUM_REGS) {
-                return 0U;
+        // The ordinary MacroEngine record hooks are bypassed on this path. No extra reads or
+        // synchronization: save PRE front state and observe this invocation's real callbacks.
+        static const char* const failure_prefix = std::getenv("EDEN_NX2_MME_FRONT_FAILURE");
+        static const u32 failure_start = [] {
+            const char* value = std::getenv("EDEN_NX2_MME_FRONT_FAILURE_START");
+            if (value == nullptr)
+                return 0x1d2U;
+            char* end{};
+            const auto parsed = std::strtoull(value, &end, 0);
+            return end != value && *end == '\0' && parsed <= std::numeric_limits<u32>::max()
+                       ? static_cast<u32>(parsed)
+                       : ~0U;
+        }();
+        static std::atomic<bool> failure_captured{};
+        FrontMacroFailureCapture* capture{};
+        if (failure_prefix != nullptr && *failure_prefix && start == failure_start &&
+            !failure_captured.load(std::memory_order_relaxed)) {
+            if (!fs.failure_capture)
+                fs.failure_capture = std::make_unique<FrontMacroFailureCapture>();
+            capture = fs.failure_capture.get();
+            capture->Reset();
+            capture->method = method;
+            capture->start = start;
+            capture->code_generation = engine.native_code_generation;
+            capture->parameter_count = parameter_count;
+            capture->code.assign(engine.native_code.begin(), engine.native_code.end());
+            capture->positions.assign(positions.begin(), positions.end());
+            capture->parameters.assign(
+                fs.parameters.begin(),
+                fs.parameters.begin() +
+                    std::min(parameter_count, FrontMacroFailureCapture::MaxParameters));
+            capture->dram.assign(native_data_ram.begin(), native_data_ram.end());
+            capture->regs.assign(fs.regs.begin(), fs.regs.end());
+            capture->shadow.assign(fs.shadow.begin(), fs.shadow.end());
+            capture->back_regs.assign(fs.back_regs.begin(), fs.back_regs.end());
+            capture->back_shadow.assign(fs.back_shadow.begin(), fs.back_shadow.end());
+            capture->owned.resize(Regs::NUM_REGS);
+            for (u32 index = 0; index < Regs::NUM_REGS; ++index) {
+                capture->owned[index] = fs.back_owned[index];
             }
-            return fs.back_owned[address] ? FrontRegister(split, fs, address) : fs.regs[address];
+            capture->front_flags = {static_cast<u32>(fs.control),
+                                    fs.draw_pending,
+                                    fs.sink_pending,
+                                    fs.split_start,
+                                    fs.skip_same,
+                                    fs.instance_loop,
+                                    fs.back_code_copied,
+                                    fs.back_escapes_seen};
+            capture->front_counters = {fs.calls, fs.back_generation, fs.back_last,
+                                       fs.back_escapes.load(std::memory_order_relaxed)};
+        }
+        fs.failure_capture_active = capture != nullptr;
+        SCOPE_EXIT {
+            fs.failure_capture_active = false;
+        };
+        const auto read = [&](u32 address) {
+            const u32 value = address >= Regs::NUM_REGS ? 0U
+                              : fs.back_owned[address]  ? FrontRegister(split, fs, address)
+                                                        : fs.regs[address];
+            if (capture != nullptr)
+                capture->Callback(1, address, value);
+            return value;
         };
         const auto emit = [&](u32 address, u32 value) {
+            if (capture != nullptr)
+                capture->Callback(2, address, value, address < MacroRegistersStart);
             if (address >= MacroRegistersStart) {
                 return false;
             }
@@ -1652,16 +1834,30 @@ void Maxwell3D::FrontRunMacro(Core::System& system, VideoCommon::GpuSplit& split
             engine.native_jit = std::make_shared<TuringMacroJit>();
         }
         engine.native_jit->Prepare(engine.native_code, engine.native_code_generation);
-        const auto result = engine.native_jit->Execute(
-            start, fs.parameters, std::span<u32>{native_data_ram}, read, emit);
+        std::optional<TuringMacroJit::Diagnostics> diagnostics;
+        if (capture != nullptr)
+            diagnostics.emplace();
+        const auto result =
+            engine.native_jit->Execute(start, fs.parameters, std::span<u32>{native_data_ram}, read,
+                                       emit, diagnostics ? &*diagnostics : nullptr);
+        if (capture != nullptr) {
+            capture->jit_state.assign(diagnostics->words.begin(), diagnostics->words.end());
+        }
 #else
         const auto result =
             engine.native_interpreter.Execute(engine.native_code, start, fs.parameters, read, emit);
 #endif
+        fs.failure_capture_active = false;
         if (!result.success) {
             engine.native_execution_failed = true;
-            LOG_ERROR(HW_GPU, "Native MME (split front) failed: start={:#x}, consumed={}/{}, error={}",
-                      start, result.consumed, parameter_count, result.error);
+            LOG_ERROR(
+                HW_GPU,
+                "Native MME (split front) failed: start={:#x}, consumed={}/{}, pc={:#x}, error={}",
+                start, result.consumed, parameter_count, result.pc, result.error);
+            if (capture != nullptr && !failure_captured.exchange(true, std::memory_order_relaxed)) {
+                capture->Save(failure_prefix, result, native_data_ram, fs.parameters.size(),
+                              engine.native_code_generation);
+            }
         }
     }
     fs.parameters.clear();
@@ -1960,6 +2156,9 @@ void Maxwell3D::FrontDmaRead(VideoCommon::GpuSplit& split, FrontState& fs, u32 m
     const u32 ram = FrontRegister(split, fs, 0x156);
     const u32 words = std::min<u32>(count, 0x1000);
     const size_t read_bytes = size_t{words} * sizeof(u32);
+    auto* const capture = fs.failure_capture_active ? fs.failure_capture.get() : nullptr;
+    const size_t capture_event =
+        capture != nullptr ? capture->BeginDma(method, source, ram, words) : 0;
     std::vector<u32> diag_before;
     if (Tegra::Nx2CmdPageDiag::g_enabled) {
         diag_before.resize(words);
@@ -2033,6 +2232,9 @@ void Maxwell3D::FrontDmaRead(VideoCommon::GpuSplit& split, FrontState& fs, u32 m
     u32 changed{};
     for (u32 i = 0; i < words; ++i) {
         const u32 word = memory_manager.Read<u32>(source + u64{i} * sizeof(u32));
+        if (capture != nullptr) {
+            capture->DmaWord(capture_event, i, word);
+        }
         if (method == 0x158) {
             fs.parameters.push_back(word);
         } else if (ram + i < native_data_ram.size()) {
