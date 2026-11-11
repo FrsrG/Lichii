@@ -11,9 +11,10 @@ calls and a 0.332 s forced unchanged rebuild with 5/5 direct cache hits.
 
 [The Windows candidate run](https://github.com/FrsrG/Lichii/actions/runs/42926072741)
 passed the complete build, import check and 10/10 CTest entries using clang-cl
-22.1.8, Qt 6.8.3 and Windows SDK 10.0.26100.0. Ten selected captured-context replay
-jobs compiled, and all 13 emitted modules passed SPIRV-Tools v2026.1 validation
-for Vulkan 1.2 (compute 6, fragment 3, geometry 2, vertex 2).
+22.1.8, Qt 6.8.3 and Windows SDK 10.0.26100.0. Sixteen selected captured-context
+replay jobs compiled, and all 19 modules passed SPIRV-Tools v2026.1 validation
+for Vulkan 1.2 (compute 12, fragment 3, geometry 2, vertex 2), including the three
+later IMAD programs using real environments captured in the final cache.
 
 The gameplay executable SHA-256 was
 `4E03A46D307C67869AC41FD590A3D653DA16CBDC625400265F1AF3AF610BAD15`.
