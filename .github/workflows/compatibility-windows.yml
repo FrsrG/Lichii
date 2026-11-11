@@ -26,6 +26,7 @@ jobs:
     env:
       CCACHE_DIR: ${{ github.workspace }}/.ccache
       CCACHE_MAXSIZE: 1G
+      LLVM_CACHE_KEY: llvm-installed-${{ runner.os }}-${{ runner.arch }}-22.1.8-16e5709785fef73c854646241c4a92c5cd574318d1b33c63330dd7721903e55c
     defaults:
       run:
         shell: bash
@@ -43,10 +44,45 @@ jobs:
           toolset: '14.44'
           sdk: '10.0.26100.0'
 
-      # The release job's compiler; ThinLTO is left to the release build to keep this job short.
+      - name: Restore pinned LLVM installation
+        id: llvm_cache
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25
+        with:
+          path: ${{ runner.temp }}/llvm
+          key: ${{ env.LLVM_CACHE_KEY }}
+
+      # Keep this installer unchanged: its file hash also identifies the compiler to ccache.
       - name: Install LLVM
+        if: steps.llvm_cache.outputs.cache-hit != 'true'
         shell: pwsh
         run: ./tools/windows/install-llvm.ps1
+
+      - name: Verify and export LLVM installation
+        id: llvm_verify
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = Join-Path $env:RUNNER_TEMP 'llvm'
+          foreach ($check in @(@('clang-cl.exe', '--version'), @('lld-link.exe', '--version'),
+                               @('llvm-lib.exe', '/help'), @('llvm-mt.exe', '/help'),
+                               @('llvm-readobj.exe', '--version'))) {
+              $tool = Join-Path $root "bin/$($check[0])"
+              if (-not (Test-Path -LiteralPath $tool -PathType Leaf)) { throw "LLVM tool missing: $tool" }
+              $reported = & $tool $check[1]
+              if ($LASTEXITCODE -ne 0) { throw "LLVM tool does not run: $tool" }
+              if ($check[0] -eq 'clang-cl.exe' -and "$reported" -notmatch 'clang version 22\.1\.8\b') {
+                  throw "Unexpected cached compiler: $reported"
+              }
+              $reported
+          }
+          "LLVM_ROOT=$($root.Replace('\', '/'))" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+
+      - name: Save pinned LLVM installation
+        if: steps.llvm_cache.outputs.cache-hit != 'true' && steps.llvm_verify.outcome == 'success'
+        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25
+        with:
+          path: ${{ runner.temp }}/llvm
+          key: ${{ env.LLVM_CACHE_KEY }}
 
       - name: Install Qt
         uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06
