@@ -154,6 +154,20 @@ timing and is reserved for an evidence-directed comparison. Both diagnostics
 are off by default; no execution budget, interpreter semantics or gameplay
 parameters are changed.
 
+## Batched CPU-write protection
+
+Ported AmateurWizrd's original commit
+[`555077432d4552e931b0b3825e851409bbd214f6`](https://github.com/atmanli/Lichii/commit/555077432d4552e931b0b3825e851409bbd214f6),
+subsequently merged upstream through PR 1460. The batch invalidation path
+claims all CPU-written ranges before a download for one range can overwrite
+another CPU write on the same page.
+
+The actual BufferCache regression reproduces the old caller ordering's
+second-write corruption (`18 == 187`); the fixed ordering passes all 14
+assertions. This verifies the cache fixture, not an end-to-end Rasterizer
+or Kirby result. The next controlled race tests whether this confirmed
+data-integrity fix resolves or contributes to the progression blocker.
+
 ## Acceptance record
 
 | Check | Result |
