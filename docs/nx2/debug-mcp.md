@@ -314,6 +314,10 @@ sticks for `frames` presented frames and then releases them. It returns when the
 runs the steps back to back, at most 1000 steps and 36000 frames per call. A step with no
 buttons and no sticks injects nothing, so it works as a pause between moves.
 
+Results include `input_poll_calls` (reads of the injected state by controller getters) and
+`controller_configuring` at sequence start. Zero polls distinguish an unobserved injector from
+successful frame counting; nonzero polls still require a visible game response to prove control.
+
 - **Buttons** are `A B X Y L R ZL ZR Plus Minus Up Down Left Right StickL StickR` (the
   `NpadButton` names). Home and Capture are not offered: they would leave the game. Unknown
   names and unknown step keys are refused, so a typo fails instead of doing nothing.

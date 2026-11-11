@@ -860,62 +860,86 @@ StorageBufferSet CollectIteratorWords(IR::Program& program) {
     std::unordered_map<const IR::Inst*, u32> lowlinks;
     std::unordered_set<const IR::Inst*> on_stack;
     std::vector<const IR::Inst*> stack;
+    struct VisitFrame {
+        const IR::Inst* inst;
+        size_t next_arg;
+    };
+    std::vector<VisitFrame> pending;
     u32 next_index{};
-    const auto visit = [&](auto&& self, const IR::Inst* inst) -> void {
-        if (indices.contains(inst)) {
-            return;
-        }
+    const auto enter = [&](const IR::Inst* inst) {
         const u32 index = next_index++;
         indices[inst] = lowlinks[inst] = index;
         stack.push_back(inst);
         on_stack.insert(inst);
         const auto op = inst->GetOpcode();
-        if (op == IR::Opcode::IAdd32 || op == IR::Opcode::Phi || op == IR::Opcode::SelectU32) {
-            for (size_t arg = op == IR::Opcode::SelectU32 ? 1 : 0; arg < inst->NumArgs(); ++arg) {
+        size_t first_arg = inst->NumArgs();
+        if (op == IR::Opcode::IAdd32 || op == IR::Opcode::Phi) {
+            first_arg = 0;
+        } else if (op == IR::Opcode::SelectU32) {
+            first_arg = 1;
+        }
+        pending.push_back({inst, first_arg});
+    };
+    const auto visit = [&](const IR::Inst* root) {
+        if (indices.contains(root)) {
+            return;
+        }
+        enter(root);
+        // Shader graphs can be deeper than the host stack. Each frame resumes after its child,
+        // just as the recursive Tarjan walk did, without retaining references across vector growth.
+        while (!pending.empty()) {
+            const IR::Inst* const inst = pending.back().inst;
+            if (pending.back().next_arg < inst->NumArgs()) {
+                const size_t arg = pending.back().next_arg++;
                 if (inst->Arg(arg).IsImmediate()) {
                     continue;
                 }
                 const IR::Inst* next = inst->Arg(arg).InstRecursive();
                 if (!indices.contains(next)) {
-                    self(self, next);
-                    lowlinks[inst] = std::min(lowlinks[inst], lowlinks[next]);
+                    enter(next);
                 } else if (on_stack.contains(next)) {
                     lowlinks[inst] = std::min(lowlinks[inst], indices[next]);
                 }
-            }
-        }
-        if (lowlinks[inst] != index) {
-            return;
-        }
-        std::vector<const IR::Inst*> component;
-        const IR::Inst* member;
-        do {
-            member = stack.back();
-            stack.pop_back();
-            on_stack.erase(member);
-            component.push_back(member);
-        } while (member != inst);
-        if (component.size() < 2) {
-            return;
-        }
-        const std::unordered_set<const IR::Inst*> members(component.begin(), component.end());
-        for (const IR::Inst* add : component) {
-            if (add->GetOpcode() != IR::Opcode::IAdd32) {
                 continue;
             }
-            for (size_t arg = 0; arg < add->NumArgs(); ++arg) {
-                const auto& term = add->Arg(arg);
-                if (!term.IsImmediate() && members.contains(term.InstRecursive())) {
-                    continue;
+            if (lowlinks[inst] == indices[inst]) {
+                std::vector<const IR::Inst*> component;
+                const IR::Inst* member;
+                do {
+                    member = stack.back();
+                    stack.pop_back();
+                    on_stack.erase(member);
+                    component.push_back(member);
+                } while (member != inst);
+                if (component.size() >= 2) {
+                    const std::unordered_set<const IR::Inst*> members(component.begin(),
+                                                                      component.end());
+                    for (const IR::Inst* add : component) {
+                        if (add->GetOpcode() != IR::Opcode::IAdd32) {
+                            continue;
+                        }
+                        for (size_t arg = 0; arg < add->NumArgs(); ++arg) {
+                            const auto& term = add->Arg(arg);
+                            if (!term.IsImmediate() && members.contains(term.InstRecursive())) {
+                                continue;
+                            }
+                            ForEachSummedWord(
+                                term, [&](StorageBufferAddr word, u32) { result.insert(word); });
+                        }
+                    }
                 }
-                ForEachSummedWord(term, [&](StorageBufferAddr word, u32) { result.insert(word); });
+            }
+            pending.pop_back();
+            if (!pending.empty()) {
+                const IR::Inst* const parent = pending.back().inst;
+                lowlinks[parent] = std::min(lowlinks[parent], lowlinks[inst]);
             }
         }
     };
     for (IR::Block* block : program.post_order_blocks) {
         for (IR::Inst& inst : block->Instructions()) {
             if (inst.GetOpcode() == IR::Opcode::Phi) {
-                visit(visit, &inst);
+                visit(&inst);
             }
         }
     }

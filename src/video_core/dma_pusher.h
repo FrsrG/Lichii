@@ -10,6 +10,7 @@
 #include <atomic>
 #include <condition_variable>
 #include <cstdlib>
+#include <memory>
 #include <optional>
 #include <span>
 #include <vector>
@@ -197,8 +198,17 @@ private:
     bool Step();
     /// Returns how many words were processed: fewer than given when a semaphore acquire
     /// suspended the channel.
-    size_t ProcessCommands(std::span<const CommandHeader> commands, size_t word_offset = 0);
+    size_t ProcessCommands(std::span<const CommandHeader> commands, size_t word_offset = 0,
+                           const char* source = "unknown", bool gpu_written = false);
     size_t command_resume_offset{}; ///< Words of the current entry done before a suspension
+
+    struct MmeCommandCapture;
+    std::unique_ptr<MmeCommandCapture> PrepareMmeCommandCapture(std::span<const u32> call);
+    // Valid only during ProcessCommands; opt-in captures copy these bytes before execution.
+    std::span<const CommandHeader> mme_parsed_commands;
+    size_t mme_parser_word_offset{}, mme_parser_index{};
+    const char* mme_parser_source = "unknown";
+    bool mme_parser_gpu_written{}, mme_parser_inline{};
 
     void SetState(const CommandHeader& command_header);
 

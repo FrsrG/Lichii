@@ -31,6 +31,8 @@ add_executable(tests
     video_core/ampere_yoshi_title.cpp
     video_core/ampere_yoshi_compute.cpp
     video_core/ampere_yoshi_imad.cpp
+    video_core/ampere_kirby_fsel.cpp
+    video_core/ampere_kirby_tex.cpp
     video_core/texture_rect_descriptor.cpp
     video_core/join_whole_copy.cpp
     audio_core/batch_decoder.cpp
@@ -49,6 +51,7 @@ add_executable(tests
     video_core/vk_byte_addressed_shadow.cpp
     video_core/global_memory_coherence.cpp
     video_core/storage_buffer_pointer_tracking.cpp
+    video_core/storage_buffer_iterator_scc.cpp
     video_core/storage_write_extent.cpp
     video_core/storage_buffer_control_flow.cpp
     core/nup_validation.cpp
@@ -189,6 +192,7 @@ add_executable(tests
     video_core/vertex_repack.cpp
     video_core/ampere_lowering.cpp
     video_core/ampere_geometry.cpp
+    video_core/ampere_geometry_spirv.cpp
     video_core/ampere_i2f.cpp
     video_core/ampere_returns.cpp
     video_core/ampere_guarded_ulea.cpp
@@ -196,6 +200,7 @@ add_executable(tests
     video_core/ampere_uniform_immediate_shift.cpp
     video_core/ampere_bindless_surfaces.cpp
     video_core/native_macro_fifo.cpp
+    video_core/mme_command_failure.cpp
     video_core/turing_macro_effects.cpp
     video_core/turing_macro_ram.cpp
     video_core/uniform_stream_reuse.cpp
@@ -296,6 +301,7 @@ add_test(NAME shader_jobs_tests COMMAND shader_jobs_tests)
 # shader_translation_tests.
 add_executable(shader_translation_tests
     video_core/stage_translation.cpp
+    video_core/storage_buffer_iterator_scc.cpp
     ../video_core/shader_jobs.cpp
     ../video_core/shader_stage_translation.cpp)
 target_link_libraries(shader_translation_tests PRIVATE common shader_recompiler

@@ -356,6 +356,19 @@ struct BufferCacheTestAccess {
     static void MarkWritten(Cache& cache, BufferId id, DAddr address, u32 size) {
         cache.MarkWrittenBuffer(id, address, size);
     }
+    /// A dispatch or copy wrote [address, address + size) of buffer `id` (Nx2NoteListWrite).
+    static void ListWrite(Cache& cache, BufferId id, DAddr address, u64 size) {
+        cache.Nx2NoteListWrite(id, address, size);
+    }
+    static void UseGpuMemory(Cache& cache, Tegra::MemoryManager& memory) {
+        cache.gpu_memory = &memory;
+    }
+    static bool Registered(Cache& cache, DAddr address, u64 size) {
+        return cache.IsRegionRegistered(address, size);
+    }
+    static Buffer& At(Cache& cache, DAddr address, u32 size) {
+        return cache.slot_buffers[cache.FindBuffer(address, size, false)];
+    }
     static size_t ReadDownloads(Cache& cache) {
         return cache.read_downloads.size();
     }
@@ -815,6 +828,217 @@ TEST_CASE("Command page readers remain ordered during batch completion", "[buffe
     REQUIRE(after == Cache::Nx2ListRead::Synced);
     REQUIRE(f.runtime.finishes == 1);
     REQUIRE(f.runtime.downloads == 1);
+}
+
+namespace {
+
+/// Makes `page` a command list page for one test (nx2.h keeps them for the session).
+struct ListPage {
+    explicit ListPage(DAddr page) {
+        Tegra::Nx2ClearGpuWrittenPages();
+        Tegra::Nx2MarkCommandListPage(page);
+    }
+    ~ListPage() {
+        Tegra::Nx2ClearGpuWrittenPages();
+    }
+    ListPage(const ListPage&) = delete;
+    ListPage& operator=(const ListPage&) = delete;
+};
+
+bool AllBytes(std::span<const u8> bytes, u8 value) {
+    return std::ranges::all_of(bytes, [value](u8 byte) { return byte == value; });
+}
+
+} // namespace
+
+TEST_CASE("Command lists on words no GPU work wrote read guest memory, not the page's copy",
+          "[buffer_ports]") {
+    Fixture f;
+    const ListPage list_page{0x20000};
+    const auto id = Access::Add(*f.cache, 0x20000, 0x10000);
+    std::ranges::fill(Access::Get(*f.cache, id).bytes, 0x77);
+    std::memset(f.bytes + 0x10000, 0x11, 0x1000);
+    // The page's first list drained the split and flushed the page (FlushGpuWrittenCommands).
+    f.cache->Nx2NoteListSynced(0x20000);
+    // A dispatch writes bytes 0x800-0x900 of the page; the copy taken after it is on its way.
+    f.cache->Nx2CollectListCopies(true);
+    Access::ListWrite(*f.cache, id, 0x20800, 0x100);
+    REQUIRE(f.cache->Nx2CopyListPages(f.runtime.CurrentTick()));
+    f.cache->Nx2CollectListCopies(false);
+    using Read = Cache::Nx2ListRead;
+    std::array<u8, 16> list{};
+    REQUIRE(f.cache->Nx2ReadListCopy(0x20100, list, true) == Read::Synced);
+    REQUIRE(f.cache->Nx2ReadListCopy(0x207f0, list, true) == Read::Synced);
+    // The GPU completes the copy. A list on the dispatch's words reads them from it; one that
+    // starts before them reads its other words from guest memory.
+    f.runtime.Finish();
+    REQUIRE(f.cache->Nx2ReadListCopy(0x20800, list, true) == Read::Copied);
+    REQUIRE(AllBytes(list, 0x77));
+    std::array<u8, 32> spanning{};
+    REQUIRE(f.cache->Nx2ReadListCopy(0x207f0, spanning, true) == Read::Copied);
+    REQUIRE(AllBytes(std::span{spanning}.first(16), 0x11));
+    REQUIRE(AllBytes(std::span{spanning}.last(16), 0x77));
+}
+
+TEST_CASE("Command list pages the front has not flushed read every word from the copy",
+          "[buffer_ports]") {
+    Fixture f;
+    const ListPage list_page{0x20000};
+    const auto id = Access::Add(*f.cache, 0x20000, 0x10000);
+    std::ranges::fill(Access::Get(*f.cache, id).bytes, 0x77);
+    std::memset(f.bytes + 0x10000, 0x11, 0x1000);
+    // GPU work may have written the page before it became a command list page: only the first
+    // write since is noted, and guest memory need not hold the rest.
+    f.cache->Nx2CollectListCopies(true);
+    Access::ListWrite(*f.cache, id, 0x20800, 0x100);
+    REQUIRE(f.cache->Nx2CopyListPages(f.runtime.CurrentTick()));
+    f.cache->Nx2CollectListCopies(false);
+    f.runtime.Finish();
+    std::array<u8, 32> list{};
+    REQUIRE(f.cache->Nx2ReadListCopy(0x20100, list, true) == Cache::Nx2ListRead::Copied);
+    REQUIRE(AllBytes(list, 0x77));
+    REQUIRE(f.cache->Nx2ReadListCopy(0x207f0, list, true) == Cache::Nx2ListRead::Copied);
+    REQUIRE(AllBytes(list, 0x77));
+}
+
+TEST_CASE("Host writes give command list words back to guest memory and retire the page's copy",
+          "[buffer_ports]") {
+    Fixture f;
+    const ListPage list_page{0x20000};
+    const auto id = Access::Add(*f.cache, 0x20000, 0x10000);
+    f.cache->Nx2NoteListSynced(0x20000);
+    f.cache->Nx2CollectListCopies(true);
+    Access::ListWrite(*f.cache, id, 0x20800, 0x100);
+    REQUIRE(f.cache->Nx2CopyListPages(f.runtime.CurrentTick()));
+    f.cache->Nx2CollectListCopies(false);
+    f.runtime.Finish();
+    using Read = Cache::Nx2ListRead;
+    std::array<u8, 16> list{};
+    REQUIRE(f.cache->Nx2ReadListCopy(0x20840, list, true) == Read::Copied);
+    // The CPU, an inline upload or a copy of bytes guest memory holds writes 0x800-0x840 whole,
+    // and two bytes of each of the words at 0x880 and 0x884.
+    f.cache->Nx2NoteListHostWrite(0x20800, 0x40);
+    f.cache->Nx2NoteListHostWrite(0x20882, 4);
+    REQUIRE(f.cache->Nx2ReadListCopy(0x20800, list, true) == Read::Synced);
+    REQUIRE(f.cache->Nx2ReadListCopy(0x20830, list, true) == Read::Synced);
+    // GPU-written words it did not write whole: the copy no longer holds the page.
+    REQUIRE(f.cache->Nx2ReadListCopy(0x20840, list, true) == Read::Unknown);
+    REQUIRE(f.cache->Nx2ReadListCopy(0x20880, list, true) == Read::Unknown);
+}
+
+TEST_CASE("A flushed command list page reads guest memory until GPU work writes it again",
+          "[buffer_ports]") {
+    Fixture f;
+    const ListPage list_page{0x20000};
+    const auto id = Access::Add(*f.cache, 0x20000, 0x10000);
+    f.cache->Nx2CollectListCopies(true);
+    Access::ListWrite(*f.cache, id, 0x20000, 0x1000);
+    REQUIRE(f.cache->Nx2CopyListPages(f.runtime.CurrentTick()));
+    using Read = Cache::Nx2ListRead;
+    std::array<u8, 16> list{};
+    REQUIRE(f.cache->Nx2ReadListCopy(0x20800, list, true) == Read::Copied);
+    // The front drained the split and flushed the page (DmaPusher::FlushGpuWrittenCommands).
+    f.cache->Nx2NoteListSynced(0x20000);
+    REQUIRE(f.cache->Nx2ReadListCopy(0x20800, list, true) == Read::Synced);
+    Access::ListWrite(*f.cache, id, 0x20900, 0x40);
+    REQUIRE(f.cache->Nx2CopyListPages(f.runtime.CurrentTick()));
+    f.cache->Nx2CollectListCopies(false);
+    f.runtime.Finish();
+    REQUIRE(f.cache->Nx2ReadListCopy(0x20800, list, true) == Read::Synced);
+    REQUIRE(f.cache->Nx2ReadListCopy(0x20900, list, true) == Read::Copied);
+}
+
+TEST_CASE("Copy engine clears give command list words back to guest memory", "[buffer_ports]") {
+    Fixture f;
+    const ListPage list_page{0x20000};
+    const auto id = Access::Add(*f.cache, 0x20000, 0x10000);
+    Tegra::MemoryManager gpu_memory{f.system, f.device, 32, 1ULL << 31, 16};
+    gpu_memory.BindRasterizer(&f.rasterizer);
+    gpu_memory.Map(0x200000, 0x20000, 0x10000, Tegra::PTEKind::PITCH, true);
+    Access::UseGpuMemory(*f.cache, gpu_memory);
+    f.cache->Nx2NoteListSynced(0x20000);
+    f.cache->Nx2CollectListCopies(true);
+    Access::ListWrite(*f.cache, id, 0x20800, 0x100);
+    REQUIRE(f.cache->Nx2CopyListPages(f.runtime.CurrentTick()));
+    f.cache->Nx2CollectListCopies(false);
+    f.runtime.Finish();
+    // 16 words cleared (MaxwellDMA's remapped constant fill writes them to guest memory too).
+    REQUIRE(f.cache->DMAClear(0x200800, 16, 0));
+    REQUIRE(AllBytes(std::span{Access::Get(*f.cache, id).bytes}.subspan(0x800, 0x40), 0));
+    using Read = Cache::Nx2ListRead;
+    std::array<u8, 16> list{};
+    REQUIRE(f.cache->Nx2ReadListCopy(0x20830, list, true) == Read::Synced);
+    REQUIRE(f.cache->Nx2ReadListCopy(0x20840, list, true) == Read::Unknown);
+}
+
+TEST_CASE("Command list word ownership survives partial host writes and later GPU writes",
+          "[buffer_ports]") {
+    Fixture f;
+    const ListPage list_page{0x20000};
+    const auto id = Access::Add(*f.cache, 0x20000, 0x10000);
+    auto& buffer = Access::Get(*f.cache, id);
+    std::ranges::fill(buffer.bytes, 0x77);
+    std::memset(f.bytes + 0x10000, 0x11, 0x1000);
+    f.cache->Nx2NoteListSynced(0x20000);
+    const auto write_and_copy = [&](DAddr address, u64 size) {
+        f.cache->Nx2CollectListCopies(true);
+        Access::ListWrite(*f.cache, id, address, size);
+        REQUIRE(f.cache->Nx2CopyListPages(f.runtime.CurrentTick()));
+        f.cache->Nx2CollectListCopies(false);
+        return f.runtime.SubmitForHostRead();
+    };
+    using Read = Cache::Nx2ListRead;
+    std::array<u8, 8> list{};
+    // A partial GPU write owns its entire word. A neighbouring host-only word need not wait.
+    const u64 first_tick = write_and_copy(0x20801, 2);
+    u64 pending_tick{};
+    REQUIRE(f.cache->Nx2ReadListCopy(0x20800, list, true, &pending_tick) == Read::Pending);
+    REQUIRE(pending_tick == first_tick);
+    REQUIRE(f.cache->Nx2ReadListCopy(0x20804, std::span{list}.first(4), true) == Read::Synced);
+    f.runtime.Complete(first_tick);
+    REQUIRE(f.cache->Nx2ReadListCopy(0x20800, list, true) == Read::Copied);
+    REQUIRE(AllBytes(std::span{list}.first(4), 0x77));
+    REQUIRE(AllBytes(std::span{list}.last(4), 0x11));
+
+    // This models ownership notification only, not the upload of partially overwritten bytes.
+    // A partial host overwrite invalidates the copy but cannot transfer the whole word.
+    std::memset(f.bytes + 0x10801, 0x22, 2);
+    f.cache->Nx2NoteListHostWrite(0x20801, 2);
+    REQUIRE(f.cache->Nx2ReadListCopy(0x20800, list, true) == Read::Unknown);
+    f.runtime.Complete(write_and_copy(0x20804, 4));
+    REQUIRE(f.cache->Nx2ReadListCopy(0x20800, list, true) == Read::Copied);
+    REQUIRE(AllBytes(list, 0x77));
+
+    // A complete host word wins until a subsequent GPU write touches it again.
+    std::memset(f.bytes + 0x10800, 0x33, 4);
+    f.cache->Nx2NoteListHostWrite(0x20800, 4);
+    REQUIRE(f.cache->Nx2ReadListCopy(0x20800, std::span{list}.first(4), true) == Read::Synced);
+    std::fill_n(buffer.bytes.begin() + 0x800, 4, 0x99);
+    f.runtime.Complete(write_and_copy(0x20802, 1));
+    REQUIRE(f.cache->Nx2ReadListCopy(0x20800, list, true) == Read::Copied);
+    REQUIRE(AllBytes(std::span{list}.first(4), 0x99));
+    REQUIRE(AllBytes(std::span{list}.last(4), 0x77));
+}
+
+TEST_CASE("Copy engine clears check the full word-count range for cached buffers",
+          "[buffer_ports]") {
+    Fixture f;
+    const auto id = Access::Add(*f.cache, 0x20000, 0x10000);
+    std::ranges::fill(Access::Get(*f.cache, id).bytes, 0x77);
+    Tegra::MemoryManager gpu_memory{f.system, f.device, 32, 1ULL << 31, 16};
+    gpu_memory.BindRasterizer(&f.rasterizer);
+    gpu_memory.Map(0x200000, 0x10000, 0x40000, Tegra::PTEKind::PITCH, true);
+    Access::UseGpuMemory(*f.cache, gpu_memory);
+    constexpr DAddr destination = 0x1ffc0;
+    constexpr u64 words = 32;
+    REQUIRE_FALSE(Access::Registered(*f.cache, destination, words));
+    REQUIRE(Access::Registered(*f.cache, destination, words * sizeof(u32)));
+    REQUIRE(f.cache->DMAClear(0x20ffc0, words, 0));
+    // The clear can merge/replace the old buffer; look up its resulting owner after the call.
+    auto& buffer = Access::At(*f.cache, destination, words * sizeof(u32));
+    const auto offset = buffer.Offset(destination);
+    REQUIRE(AllBytes(std::span{buffer.bytes}.subspan(offset, words * sizeof(u32)), 0));
+    REQUIRE(AllBytes(std::span{buffer.bytes}.subspan(offset + words * sizeof(u32), 16), 0x77));
 }
 
 TEST_CASE("Native uniform banks upload directly without overwriting GPU-owned bytes",

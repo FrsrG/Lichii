@@ -71,4 +71,50 @@ TEST_CASE("Owned native macro FIFOs preserve loads across DMA appends and repeat
         parameters.clear();
     }
 }
+
+TEST_CASE("Native macro step-limit diagnostics report the attempted nonzero PC",
+          "[video_core][native_macro][mme_failure]") {
+    std::array<u32, 3> bits{};
+    const auto field = [&](u32 offset, u32 count, u32 value) {
+        for (u32 bit = 0; bit < count; ++bit) {
+            bits[(offset + bit) / 32] |= ((value >> bit) & 1) << ((offset + bit) % 32);
+        }
+    };
+    // An unconditional branch by zero at PC2, with no reads, outputs or FIFO loads.
+    for (u32 lane = 0; lane < 2; ++lane) {
+        field(15 + lane * 36, 5, 24);
+        field(20 + lane * 36, 5, 24);
+        field(25 + lane * 36, 5, 24);
+    }
+    field(10, 5, 24);
+    std::vector<u32> code(9);
+    code[6] = bits[2];
+    code[7] = bits[1];
+    code[8] = bits[0];
+    Tegra::TuringMacroJit jit;
+    jit.Prepare(code, 1);
+    std::array<u32, 0xc00> ram{};
+    std::vector<u32> parameters;
+    u32 reads{}, emits{};
+    Tegra::TuringMacroJit::Diagnostics diagnostic;
+    const auto result = jit.Execute(
+        2, parameters, ram,
+        [&](u32) {
+            ++reads;
+            return 0U;
+        },
+        [&](u32, u32) {
+            ++emits;
+            return true;
+        },
+        &diagnostic);
+    REQUIRE_FALSE(result.success);
+    CHECK(result.error == "instruction limit exceeded");
+    CHECK(result.pc == 2);
+    CHECK(result.consumed == 0);
+    CHECK(reads == 0);
+    CHECK(emits == 0);
+    CHECK(diagnostic.words[30] == 0); // Existing dispatch budget exhausted, not increased.
+    CHECK(diagnostic.words[37] == 2);
+}
 #endif

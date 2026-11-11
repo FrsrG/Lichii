@@ -32,7 +32,10 @@ add_executable(ampere-quick-tests
     main.cpp
     "${REPOSITORY_ROOT}/src/tests/video_core/ampere_yoshi_compute.cpp"
     "${REPOSITORY_ROOT}/src/tests/video_core/ampere_yoshi_imad.cpp"
+    "${REPOSITORY_ROOT}/src/tests/video_core/ampere_kirby_fsel.cpp"
+    "${REPOSITORY_ROOT}/src/tests/video_core/ampere_kirby_tex.cpp"
     "${REPOSITORY_ROOT}/src/tests/video_core/ampere_geometry_exit.cpp"
+    "${REPOSITORY_ROOT}/src/tests/video_core/ampere_geometry.cpp"
     "${REPOSITORY_ROOT}/src/tests/video_core/ampere_compute_lowering.cpp")
 target_compile_features(ampere-quick-tests PRIVATE cxx_std_20)
 target_include_directories(ampere-quick-tests PRIVATE "${REPOSITORY_ROOT}/src")

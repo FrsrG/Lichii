@@ -25,7 +25,7 @@ struct GeometryExitEnvelope {
 inline constexpr u32 GeometryExitSetupInstructions = 5;
 
 template <typename Code>
-GeometryExitEnvelope AnalyzeGeometryExit(const Code& code) {
+GeometryExitEnvelope AnalyzeGeometryExit(const Code& code, bool preserve_handler_register = false) {
     constexpr u32 ModeMask = 0xc00001ffU;
     constexpr size_t Setup = GeometryExitSetupInstructions;
     GeometryExitEnvelope result;
@@ -107,7 +107,9 @@ GeometryExitEnvelope AnalyzeGeometryExit(const Code& code) {
             return fail(index, "native branch leaves exit envelope body");
     }
 
-    u32 live_registers = 0b1011, live_predicates = 0b1;
+    // The lowering may keep the original MOV R3, handler instead of discarding its value.
+    // R0, R1 and P0 still have to be overwritten before the body reads their removed setup.
+    u32 live_registers = preserve_handler_register ? 0b0011 : 0b1011, live_predicates = 0b1;
     for (size_t index = Setup; live_registers || live_predicates; ++index) {
         const u32 opcode = bits(index, 0, 12), family = opcode & 0x1ff;
         const u32 form = (opcode >> 9) & 7, guard = bits(index, 12, 4);
@@ -172,6 +174,11 @@ GeometryExitEnvelope AnalyzeGeometryExit(const Code& code) {
             read_sources(true);
             write_register(bits(index, 16, 8));
             write_predicate(bits(index, 81, 3));
+        } else if (opcode == 0x819) {
+            // SHF with an immediate shift reads the low and high words in a/c, writes Rd.
+            read_register(bits(index, 24, 8));
+            read_register(bits(index, 64, 8));
+            write_register(bits(index, 16, 8));
         } else if (opcode == 0x321) {
             // ALD: loads 1-4 components into Rd.. from the vertex in b, indexed by a unless RZ.
             read_register(bits(index, 24, 8));

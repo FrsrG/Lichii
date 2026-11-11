@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -55,6 +56,12 @@ public:
         const std::vector<Word>* fifo;
     };
 
+    // Optional post-call diagnostic: registers followed by the initialized scalar state.
+    // No host pointers or per-instruction tracing are exposed.
+    struct Diagnostics {
+        std::array<Word, 38> words{};
+    };
+
     enum Error : Word {
         None = 0,
         FifoUnderflow,
@@ -101,7 +108,7 @@ public:
 
     template <typename Read, typename Emit>
     Result Execute(Word start, std::vector<Word>& parameters, std::span<Word> data_ram, Read read,
-                   Emit emit) {
+                   Emit emit, Diagnostics* diagnostics = nullptr) {
         State state;
         state.regs.fill(0);
         state.carry = state.method = state.increment = 0;
@@ -120,6 +127,15 @@ public:
         state.emit = &Thunks<Read, Emit>::CallEmit;
         state.read = &Thunks<Read, Emit>::CallRead;
         const Word error = program->entry(&state);
+        if (diagnostics != nullptr) {
+            std::copy(state.regs.begin(), state.regs.end(), diagnostics->words.begin());
+            const std::array<Word, 14> scalar{state.carry,       state.method,     state.increment,
+                                              state.loop_count,  state.loop_start, state.loop_end,
+                                              state.steps,       state.end_next,   state.stopped,
+                                              state.cancel_end,  state.start,      state.consumed,
+                                              state.params_size, state.fail_pc};
+            std::copy(scalar.begin(), scalar.end(), diagnostics->words.begin() + state.regs.size());
+        }
         if (error == None) {
             return {true, state.fail_pc, state.consumed, {}};
         }
@@ -208,6 +224,10 @@ private:
             ret();
             const auto fail_with = [&](Xbyak::Label& label, Word error) {
                 L(label);
+                if (error == StepLimit) {
+                    // Dispatch has not overwritten eax: it is the attempted next native PC.
+                    mov(dword[st + offsetof(State, fail_pc)], eax);
+                }
                 mov(eax, error);
                 jmp(leave, T_NEAR);
             };

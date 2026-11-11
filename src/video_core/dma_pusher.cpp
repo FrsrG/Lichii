@@ -7,8 +7,11 @@
 #include <algorithm>
 #include <atomic>
 #include <bit>
+#include <chrono>
 #include <cstdlib>
 #include <cstdio>
+#include <fstream>
+#include <sstream>
 #include <span>
 #include <utility>
 #include <vector>
@@ -36,6 +39,156 @@ namespace Tegra {
 
 constexpr u32 MacroRegistersStart = 0xE00;
 constexpr u32 ComputeInline = 0x6D;
+
+// Only the existing parser span and submit-time copy are read. Own all bytes before the macro
+// executes, because a fast guest-memory span may change while the front is running the macro.
+struct DmaPusher::MmeCommandCapture {
+    static_assert(sizeof(CommandHeader) == sizeof(u32));
+    std::vector<CommandHeader> parsed, submitted;
+    std::vector<u32> call;
+    size_t call_count{};
+    std::string metadata;
+
+    void Save(const MmeCommandFailure::Failure& failure) const {
+        if (MmeCommandFailure::captured.exchange(true, std::memory_order_relaxed)) {
+            return;
+        }
+        const std::string base =
+            std::string{MmeCommandFailure::Prefix()} + "-" +
+            std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
+        bool ok = true;
+        const auto write = [&](const char* suffix, const auto& words) {
+            const auto bytes = std::as_bytes(std::span{words});
+            std::ofstream file{base + suffix, std::ios::binary};
+            file.write(reinterpret_cast<const char*>(bytes.data()),
+                       static_cast<std::streamsize>(bytes.size()));
+            file.close();
+            ok &= !file.fail();
+        };
+        write(".parsed", parsed);
+        write(".submitted", submitted);
+        write(".parameters", failure.parameters);
+        write(".call", call);
+        const bool covered = call_count == call.size() &&
+                             MmeCommandFailure::AllParametersInCall(
+                                 failure.parameter_count, failure.parameters, call);
+        std::ofstream meta{base + ".txt"};
+        meta << metadata << "failure_serial=" << failure.serial
+             << "\nmacro_method=" << failure.method << "\nmacro_start=" << failure.start
+             << "\ncode_generation_before=" << failure.generation
+             << "\ncode_generation_after=" << failure.final_generation
+             << "\nparameter_count=" << failure.parameter_count
+             << "\nparameters_captured=" << failure.parameters.size()
+             << "\nparameters_dropped=" << failure.parameter_count - failure.parameters.size()
+             << "\nconsumed=" << failure.consumed << "\nattempted_pc=" << failure.pc
+             << "\nattempted_pc_valid=" << (failure.error == "instruction limit exceeded")
+             << "\nerror=" << failure.error << "\ncall_words=" << call_count
+             << "\ncall_words_captured=" << call.size()
+             << "\ncall_words_dropped=" << call_count - call.size()
+             << "\nall_parameters_in_current_call=" << covered
+             << "\nparameter_provenance=" << (covered ? "current-call" : "partial")
+             << "\nearlier_parameter_entry_history_captured=0\n";
+        meta.close();
+        ok &= !meta.fail();
+        if (ok) {
+            LOG_INFO(HW_GPU, "Saved one split-front MME command failure to {}", base);
+        } else {
+            LOG_ERROR(HW_GPU, "MME command failure capture could not write every file at {}", base);
+        }
+    }
+};
+
+std::unique_ptr<DmaPusher::MmeCommandCapture> DmaPusher::PrepareMmeCommandCapture(
+    std::span<const u32> call) {
+    if (!MmeCommandFailure::Armed()) {
+        return nullptr;
+    }
+    auto capture = std::make_unique<MmeCommandCapture>();
+    capture->call_count = call.size();
+    capture->call.assign(call.begin(), call.begin() +
+                                          std::min(call.size(), MmeCommandFailure::MaxParameters));
+    const auto window =
+        MmeCommandFailure::EntryWindow(mme_parsed_commands.size(), mme_parser_index);
+    const auto parsed = mme_parsed_commands.subspan(window.begin, window.count);
+    capture->parsed.assign(parsed.begin(), parsed.end());
+
+    const CommandList* const list = dma_pushbuffer.empty() ? nullptr : &dma_pushbuffer.front();
+    const bool has_header = list != nullptr && list->prefetch_command_list.empty() &&
+                            dma_pushbuffer_subindex < list->command_lists.size();
+    const bool deferred = list != nullptr &&
+                          std::ranges::binary_search(list->deferred_entries,
+                                                     static_cast<u32>(dma_pushbuffer_subindex));
+    const size_t entry_word = mme_parser_word_offset + window.begin;
+    size_t submitted_entry_words{};
+    bool submitted_available{};
+    if (has_header && !deferred && dma_pushbuffer_subindex < list->submitted_offsets.size()) {
+        const size_t begin = list->submitted_offsets[dma_pushbuffer_subindex];
+        if (begin <= list->submitted_words.size()) {
+            submitted_available = true;
+            submitted_entry_words = std::min<size_t>(
+                list->command_lists[dma_pushbuffer_subindex].size,
+                list->submitted_words.size() - begin);
+            const size_t offset = std::min(entry_word, submitted_entry_words);
+            const size_t count = std::min(window.count, submitted_entry_words - offset);
+            const auto first = list->submitted_words.begin() + begin + offset;
+            capture->submitted.assign(first, first + count);
+        }
+    }
+
+    std::ostringstream meta;
+    meta << "format=split-front-mme-command-failure-v1\nbyte_order="
+         << (std::endian::native == std::endian::little ? "little" : "big")
+         << "\nchannel=" << channel_state.bind_id << "\nentry_index=" << dma_pushbuffer_subindex
+         << "\nentry_header_present=" << has_header;
+    if (has_header) {
+        const auto& header = list->command_lists[dma_pushbuffer_subindex];
+        meta << "\nentry_raw=" << header.raw << "\nentry_address=" << header.addr.Value()
+             << "\nentry_words=" << header.size.Value();
+    }
+    meta << "\nparsed_source=" << mme_parser_source
+         << "\nparsed_span_words=" << mme_parsed_commands.size()
+         << "\nparsed_span_entry_word=" << mme_parser_word_offset
+         << "\nparsed_window_begin=" << window.begin
+         << "\nparsed_window_entry_word=" << entry_word
+         << "\nparsed_captured=" << capture->parsed.size()
+         << "\nparsed_dropped=" << mme_parsed_commands.size() - capture->parsed.size()
+         << "\nparser_index=" << mme_parser_index
+         << "\ncall_entry_word=" << mme_parser_word_offset + mme_parser_index
+         << "\ninline_argument=" << mme_parser_inline
+         << "\nsubmitted_available=" << submitted_available
+         << "\nsubmitted_entry_words=" << submitted_entry_words
+         << "\nsubmitted_window_entry_word=" << entry_word
+         << "\nsubmitted_captured=" << capture->submitted.size()
+         << "\nsubmitted_dropped=" << submitted_entry_words - capture->submitted.size()
+         << "\nsubmitted_window_complete="
+         << (submitted_available && capture->submitted.size() == window.count)
+         << "\nsnapshot_suspensions=" << (list ? list->snapshot_suspensions : 0)
+         << "\ncurrent_suspensions=" << suspensions.load(std::memory_order_relaxed)
+         << "\nentry_deferred=" << deferred << "\ngpu_written=" << mme_parser_gpu_written
+         << "\ncommand_resume_offset=" << command_resume_offset
+         << "\nresumed_list_read=" << resumed_list_read
+         << "\npending_list_tick_present=" << pending_list_tick.has_value()
+         << "\npending_list_tick=" << pending_list_tick.value_or(0)
+         << "\ndma_method=" << dma_state.method << "\ndma_subchannel=" << dma_state.subchannel
+         << "\ndma_method_count=" << dma_state.method_count
+         << "\ndma_length_pending=" << dma_state.length_pending
+         << "\ndma_get=" << dma_state.dma_get << "\ndma_word_offset=" << dma_state.dma_word_offset
+         << "\ndma_non_incrementing=" << dma_state.non_incrementing
+         << "\ndma_increment_once=" << dma_increment_once
+         << "\ndma_is_last_call=" << dma_state.is_last_call
+         << "\nengine=" << static_cast<u32>(subchannel_type[dma_state.subchannel])
+         << "\nsplit_method_end=" << split_method_end
+         << "\nparked_count=" << parked_methods.size();
+    for (size_t index = 0; index < parked_methods.size(); ++index) {
+        const auto& parked = parked_methods[index];
+        meta << "\nparked_" << index << '=' << parked.method << ',' << parked.subchannel << ','
+             << parked.method_count << ',' << parked.non_incrementing << ','
+             << parked.increment_once << ',' << parked.resume_address;
+    }
+    meta << '\n';
+    capture->metadata = meta.str();
+    return capture;
+}
 
 bool DmaPusher::IsMemoryWriter(const Engines::EngineInterface& engine, Engines::EngineTypes type,
                               u32 method) {
@@ -187,7 +340,8 @@ bool DmaPusher::Step() {
     if (prefetch_size > 0) {
         const std::span<const CommandHeader> commands{command_list.prefetch_command_list};
         command_resume_offset +=
-            ProcessCommands(commands.subspan(command_resume_offset), command_resume_offset);
+            ProcessCommands(commands.subspan(command_resume_offset), command_resume_offset,
+                            "prefetch");
         if (puller.HasPendingAcquire()) {
             return false;
         }
@@ -321,7 +475,7 @@ bool DmaPusher::Step() {
                 header.size};
             RecordParsedEntry(header, commands);
             Nx2CmdPageDiag::CountEntry(Nx2CmdPageDiag::Path::Submitted);
-            command_resume_offset += ProcessCommands(commands, 0);
+            command_resume_offset += ProcessCommands(commands, 0, "submitted", gpu_written);
         } else if (use_safe) {
             Tegra::Memory::GpuGuestMemory<Tegra::CommandHeader, Tegra::Memory::GuestMemoryFlags::SafeRead>headers(memory_manager, dma_state.dma_get, header.size, &command_headers);
             const std::span<const CommandHeader> commands{headers.data(), headers.size()};
@@ -331,7 +485,8 @@ bool DmaPusher::Step() {
             }
             Nx2CmdPageDiag::CountEntry(Nx2CmdPageDiag::Path::Safe);
             command_resume_offset +=
-                ProcessCommands(commands.subspan(command_resume_offset), command_resume_offset);
+                ProcessCommands(commands.subspan(command_resume_offset), command_resume_offset,
+                                "safe", gpu_written);
         } else if (bool pending = false;
                    ReadGpuWrittenCommands(dma_state.dma_get, static_cast<u32>(header.size),
                                           &pending) ||
@@ -347,7 +502,8 @@ bool DmaPusher::Step() {
             }
             Nx2CmdPageDiag::CountEntry(Nx2CmdPageDiag::Path::Copy);
             command_resume_offset +=
-                ProcessCommands(commands.subspan(command_resume_offset), command_resume_offset);
+                ProcessCommands(commands.subspan(command_resume_offset), command_resume_offset,
+                                "copy", gpu_written);
         } else {
             FlushGpuWrittenCommands(dma_state.dma_get, size_t{header.size} * sizeof(u32));
             Tegra::Memory::GpuGuestMemory<Tegra::CommandHeader, Tegra::Memory::GuestMemoryFlags::UnsafeRead>headers(memory_manager, dma_state.dma_get, header.size, &command_headers);
@@ -358,7 +514,8 @@ bool DmaPusher::Step() {
             }
             Nx2CmdPageDiag::CountEntry(Nx2CmdPageDiag::Path::Slow);
             command_resume_offset +=
-                ProcessCommands(commands.subspan(command_resume_offset), command_resume_offset);
+                ProcessCommands(commands.subspan(command_resume_offset), command_resume_offset,
+                                "slow", gpu_written);
         }
         if (puller.HasPendingAcquire()) {
             return false;
@@ -402,8 +559,25 @@ bool DmaPusher::Step() {
     return true;
 }
 
-size_t DmaPusher::ProcessCommands(std::span<const CommandHeader> commands, size_t word_offset) {
+size_t DmaPusher::ProcessCommands(std::span<const CommandHeader> commands, size_t word_offset,
+                                const char* source, bool gpu_written) {
+    const bool observe = MmeCommandFailure::Armed();
+    if (observe) {
+        mme_parsed_commands = commands;
+        mme_parser_word_offset = word_offset;
+        mme_parser_source = source;
+        mme_parser_gpu_written = gpu_written;
+    }
+    SCOPE_EXIT {
+        if (observe) {
+            mme_parsed_commands = {};
+        }
+    };
     for (size_t index = 0; index < commands.size();) {
+        if (observe) {
+            mme_parser_index = index;
+            mme_parser_inline = false;
+        }
         // Data word of methods command
         if (dma_state.method_count && dma_state.non_incrementing) {
             auto const& command_header = commands[index]; //must ref (MUltiMethod re)
@@ -469,6 +643,9 @@ size_t DmaPusher::ProcessCommands(std::span<const CommandHeader> commands, size_
                 dma_state.method = command_header.method;
                 dma_state.subchannel = command_header.subchannel;
                 dma_state.dma_word_offset = u64(-s64(dma_state.dma_get)); // negate to set address as 0
+                if (observe) {
+                    mme_parser_inline = true;
+                }
                 CallMethod(command_header.arg_count);
                 dma_state.non_incrementing = true;
                 dma_increment_once = false;
@@ -589,8 +766,18 @@ void DmaPusher::CallMethod(u32 argument) {
                 if (type == Engines::EngineTypes::Maxwell3D) {
                     auto* const maxwell3d = static_cast<Engines::Maxwell3D*>(subchannel);
                     if (maxwell3d->GetNativeMacroEngine().native_turing) {
+                        auto capture = dma_state.method >= MacroRegistersStart &&
+                                               dma_state.is_last_call
+                                           ? PrepareMmeCommandCapture({&argument, 1})
+                                           : nullptr;
+                        const auto* before = capture ? maxwell3d->FrontCommandFailure() : nullptr;
+                        const u64 serial = before ? before->serial : 0;
                         maxwell3d->FrontCallMethod(system, split, dma_state.method, argument,
                                                    dma_state.is_last_call);
+                        const auto* after = capture ? maxwell3d->FrontCommandFailure() : nullptr;
+                        if (after != nullptr && after->serial > serial) {
+                            capture->Save(*after);
+                        }
                         return;
                     }
                 } else if (type == Engines::EngineTypes::KeplerCompute) {
@@ -650,8 +837,18 @@ void DmaPusher::CallMultiMethod(const u32* base_start, u32 num_methods) {
                 if (type == Engines::EngineTypes::Maxwell3D) {
                     auto* const maxwell3d = static_cast<Engines::Maxwell3D*>(subchannel);
                     if (maxwell3d->GetNativeMacroEngine().native_turing) {
+                        auto capture = dma_state.method >= MacroRegistersStart &&
+                                               num_methods == dma_state.method_count
+                                           ? PrepareMmeCommandCapture({base_start, num_methods})
+                                           : nullptr;
+                        const auto* before = capture ? maxwell3d->FrontCommandFailure() : nullptr;
+                        const u64 serial = before ? before->serial : 0;
                         maxwell3d->FrontCallMultiMethod(system, split, dma_state.method, base_start,
                                                         num_methods, dma_state.method_count);
+                        const auto* after = capture ? maxwell3d->FrontCommandFailure() : nullptr;
+                        if (after != nullptr && after->serial > serial) {
+                            capture->Save(*after);
+                        }
                         return;
                     }
                 } else if (type == Engines::EngineTypes::KeplerCompute) {

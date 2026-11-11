@@ -17,6 +17,20 @@ inline u64 NativeRegisterCopy(u32 destination_bank, u32 destination, u32 source_
     return 0x5c98000000070000ULL | (u64{10} << 44) | destination | (u64{destination_bank} << 8) |
            (u64{source_bank} << 10) | (u64{source} << 20);
 }
+// F60's handle is uniform. Its ordinary operands follow TEX's packed value list and split
+// result layout. Adapted from Eglantine b2cc16d05eeb (Alleexxi), restricted to this opcode.
+inline std::array<u32, 4> UniformTexRegisterSpans(const Instruction& input) {
+    constexpr std::array<u32, 8> coordinates{1, 2, 3, 3, 2, 3, 0, 4};
+    const u32 n = coordinates[input.Bits(61, 3)], lod = input.Bits(87, 3);
+    const u32 count = n + (lod == 2 || lod == 3 || lod == 6 || lod == 7 ? 1 : 0) +
+                      input.Bits(76, 1) + input.Bits(78, 1);
+    const u32 in_a = count <= 4 ? (count + 1) / 2 : 4;
+    const u32 components = static_cast<u32>(std::popcount(input.Bits(72, 4)));
+    const bool split = input.Bits(64, 8) != 255, half = input.Bits(79, 1);
+    const u32 first = split ? (std::min)(components, 2U) : components;
+    return {half ? (first + 1) / 2 : first, in_a, count - in_a,
+            split && components > 2 ? (half ? (components - 1) / 2 : components - 2) : 0U};
+}
 // Preserve high guest registers in SSA while borrowing aligned low quartets
 // for one native instruction. The expanded instruction owns its temporary bank.
 inline RegisterPressure PrepareRegisterPressure(const Instruction& input, u32 reserved) {
@@ -54,6 +68,7 @@ inline RegisterPressure PrepareRegisterPressure(const Instruction& input, u32 re
         break;
     case 0x807:
     case 0x808:
+    case 0xc08: // FSEL: B is uniform, only Rd and Ra are ordinary registers.
     case 0x923:
     case 0x820:
     case 0xa20:
@@ -116,6 +131,14 @@ inline RegisterPressure PrepareRegisterPressure(const Instruction& input, u32 re
         operand(32, 4);
         operand(64, 2);
         break;
+    case 0xf60: {
+        const auto spans = UniformTexRegisterSpans(input);
+        constexpr std::array<u32, 4> offsets{16, 24, 32, 64};
+        for (u32 index = 0; index < spans.size(); ++index) {
+            if (spans[index]) operand(offsets[index], spans[index]);
+        }
+        break;
+    }
     case 0x224:
     case 0x223:
         operand(16);
