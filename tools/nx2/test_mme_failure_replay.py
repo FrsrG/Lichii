@@ -110,6 +110,13 @@ class ReplayTests(unittest.TestCase):
         self.assertEqual((rc, report["status"], report["matched_event_prefix"]),
                          (2, "missing_context", 1))
 
+    def test_early_return_with_captured_events_is_divergence_even_if_truncated(self):
+        rc, report = self.run_capture([fifo(0x100, True), instruction()], [42],
+            [emitted(0x100, 42), emitted(0x101, 43)], total_events=3)
+        self.assertEqual((rc, report["status"], report["matched_event_prefix"]),
+                         (1, "mismatch", 1))
+        self.assertTrue(report["capture_truncated"])
+
     def test_truncated_dma_words_are_never_invented(self):
         rc, report = self.run_capture([fifo(0x158, True), instruction()], [2],
             [emitted(0x158, 2), (3, 0x158, 0, 2, 0, 1, 0x12340000)], dma=[11], total_dma=2)

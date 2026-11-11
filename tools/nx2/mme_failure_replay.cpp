@@ -208,11 +208,14 @@ int Replay(const std::string &prefix) {
       status = truncated ? "missing_context" : "inconclusive_budget";
       detail = "JIT dispatch and interpreter instruction budgets count "
                "different work; not a termination equivalence proof";
+    } else if (cursor != events.size()) {
+      status = "mismatch";
+      detail = "interpreter returned while additional captured callbacks remain";
     } else if (truncated) {
       status = "missing_context";
       detail =
           "capture is truncated; a matching prefix is not a complete replay";
-    } else if (cursor != events.size() || result->error != meta.at("error") ||
+    } else if (result->error != meta.at("error") ||
                result->success != meta.at("error").empty() ||
                result->consumed != number("consumed") ||
                parameters.size() != number("parameter_count_after") ||
