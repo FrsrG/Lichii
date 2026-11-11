@@ -623,7 +623,10 @@ json RunInput(ToolState& state, const std::vector<InputStep>& steps, const json&
     const int timeout = Param<int>(params, "timeout_s", static_cast<int>(total / 20 + 10), 1, 900);
     const u64 start = g_nx2_present_count.load(std::memory_order_relaxed) + 1;
     const auto script = std::make_shared<const std::vector<InputStep>>(steps);
-    controller->SetInputInjector([script, start] {
+    const auto polls = std::make_shared<std::atomic<u64>>(0);
+    const bool configuring = controller->IsConfiguring();
+    controller->SetInputInjector([script, start, polls] {
+        polls->fetch_add(1, std::memory_order_relaxed);
         return InputAt(*script, start, g_nx2_present_count.load(std::memory_order_relaxed));
     });
     SCOPE_EXIT {
@@ -655,6 +658,8 @@ json RunInput(ToolState& state, const std::vector<InputStep>& steps, const json&
         {"steps", steps.size()},
         {"frames", total},
         {"first_present", start},
+        {"input_poll_calls", polls->load(std::memory_order_relaxed)},
+        {"controller_configuring", configuring},
         {"elapsed_s",
          std::chrono::duration<double>(std::chrono::steady_clock::now() - begin).count()},
     };
