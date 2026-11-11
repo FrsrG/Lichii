@@ -26,7 +26,7 @@ jobs:
     env:
       CCACHE_DIR: ${{ github.workspace }}/.ccache
       CCACHE_MAXSIZE: 1G
-      LLVM_CACHE_KEY: llvm-installed-${{ runner.os }}-${{ runner.arch }}-22.1.8-16e5709785fef73c854646241c4a92c5cd574318d1b33c63330dd7721903e55c
+      LLVM_CACHE_ID: 22.1.8-16e5709785fef73c854646241c4a92c5cd574318d1b33c63330dd7721903e55c
     defaults:
       run:
         shell: bash
@@ -49,7 +49,7 @@ jobs:
         uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25
         with:
           path: ${{ runner.temp }}/llvm
-          key: ${{ env.LLVM_CACHE_KEY }}
+          key: llvm-installed-${{ runner.os }}-${{ runner.arch }}-${{ env.LLVM_CACHE_ID }}
 
       # Keep this installer unchanged: its file hash also identifies the compiler to ccache.
       - name: Install LLVM
@@ -82,7 +82,7 @@ jobs:
         uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25
         with:
           path: ${{ runner.temp }}/llvm
-          key: ${{ env.LLVM_CACHE_KEY }}
+          key: llvm-installed-${{ runner.os }}-${{ runner.arch }}-${{ env.LLVM_CACHE_ID }}
 
       - name: Install Qt
         uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06
