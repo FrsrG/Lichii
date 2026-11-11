@@ -140,7 +140,14 @@ jobs:
           CCACHE_COMPILERCHECK: string:${{ hashFiles('tools/windows/install-llvm.ps1') }}
         run: |
           ccache --zero-stats
-          cmake --build build --target yuzu yuzu-cmd shader-sweep --parallel
+          cmake --build build --target yuzu yuzu-cmd shader-sweep shader_translation_tests --parallel
+
+      - name: Run focused shader IR regressions
+        id: focused_tests
+        run: >-
+          ctest --test-dir build --output-on-failure --no-tests=error
+          -R '^shader_translation_tests$'
+          --output-junit "$GITHUB_WORKSPACE/build/kirby-focused-tests.xml"
 
       - name: Report provisional compiler cache statistics
         if: always() && steps.provisional_compile.outcome != 'skipped'
@@ -151,7 +158,7 @@ jobs:
 
       - name: Package PROVISIONAL runtime
         id: provisional_package
-        if: always() && steps.provisional_compile.outcome == 'success'
+        if: always() && steps.provisional_compile.outcome == 'success' && steps.focused_tests.outcome == 'success'
         shell: pwsh
         run: |
           windeployqt --release --no-translations build/bin/lichii.exe
@@ -239,6 +246,7 @@ jobs:
           path: |
             build/Testing/
             build/compatibility-tests.xml
+            build/kirby-focused-tests.xml
             build/compatibility-metrics/
             build/compatibility-toolchain.json
           retention-days: 14
