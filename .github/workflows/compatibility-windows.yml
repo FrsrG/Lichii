@@ -1,9 +1,15 @@
-name: compatibility-windows
+name: kirby-compatibility-windows
 
 on:
   workflow_dispatch:
-  push:
+  pull_request:
     branches: [compat/yoshi-build150]
+    paths:
+      - 'src/**'
+      - 'tools/windows/**'
+      - '.github/workflows/compatibility-windows.yml'
+  push:
+    branches: [compat/kirby-air-riders]
     paths:
       - 'src/**'
       - '.github/workflows/compatibility-windows.yml'
@@ -13,7 +19,7 @@ permissions:
 
 concurrency:
   group: compatibility-windows-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   windows-clang-cl:
@@ -112,6 +118,7 @@ jobs:
           "-DCMAKE_AR=$LLVM_ROOT/bin/llvm-lib.exe"
           "-DCMAKE_C_FLAGS=-DWIN32 -D_WINDOWS -DNOMINMAX"
           "-DCMAKE_CXX_FLAGS=-DWIN32 -D_WINDOWS -EHsc -DNOMINMAX"
+          "-DCMAKE_EXE_LINKER_FLAGS=/DEBUG"
           -DENABLE_DEBUG_TOOLS=ON -DENABLE_WERROR=ON
           -DENABLE_LTO=OFF
           -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=OFF
@@ -153,13 +160,14 @@ jobs:
           windeployqt --release --no-translations build/bin/lichii.exe
           if ($LASTEXITCODE -ne 0) { throw 'windeployqt failed' }
           Copy-Item -LiteralPath "$env:VULKAN_SDK/Bin/spirv-val.exe" -Destination build/bin/
+          if (-not (Test-Path -LiteralPath build/bin/lichii.pdb)) { throw 'Diagnostic runtime PDB is missing' }
           ./tools/windows/write-compatibility-provenance.ps1 -Stage provisional
 
       - name: Upload PROVISIONAL Windows package
         if: always() && steps.provisional_package.outcome == 'success'
         uses: actions/upload-artifact@v7
         with:
-          name: lichii-build150-yoshi-windows-PROVISIONAL-${{ github.sha }}-${{ github.run_attempt }}
+          name: lichii-kirby-windows-PROVISIONAL-${{ github.sha }}-${{ github.run_attempt }}
           path: build/bin/
           retention-days: 14
           if-no-files-found: error
@@ -212,7 +220,7 @@ jobs:
         if: always() && steps.validated_package.outcome == 'success'
         uses: actions/upload-artifact@v7
         with:
-          name: lichii-build150-yoshi-windows-VALIDATED-${{ github.sha }}-${{ github.run_attempt }}
+          name: lichii-kirby-windows-VALIDATED-${{ github.sha }}-${{ github.run_attempt }}
           path: build/bin/
           retention-days: 14
           if-no-files-found: error
