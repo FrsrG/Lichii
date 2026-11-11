@@ -26,6 +26,7 @@
 #include "video_core/engines/engine_upload.h"
 #include "video_core/gpu.h"
 #include "video_core/macro.h"
+#include "video_core/mme_command_failure.h"
 #include "video_core/nx2_fast_draw.h"
 #include "video_core/nx2_perf.h"
 #include "video_core/textures/texture.h"
@@ -3216,6 +3217,9 @@ public:
                          u32 argument, bool is_last_call);
     void FrontCallMultiMethod(Core::System& system, VideoCommon::GpuSplit& split, u32 method,
                               const u32* base_start, u32 amount, u32 methods_pending);
+
+    /// Front-thread-only diagnostic; never reads the back's native_execution_failed flag.
+    const MmeCommandFailure::Failure* FrontCommandFailure() const;
 
     bool ShouldExecute() const {
         return execute_on;

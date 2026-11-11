@@ -1310,7 +1310,12 @@ struct Maxwell3D::FrontState {
     u32 back_escapes_seen{};
     std::unique_ptr<FrontMacroFailureCapture> failure_capture;
     bool failure_capture_active{};
+    MmeCommandFailure::Failure command_failure;
 };
+
+const MmeCommandFailure::Failure* Maxwell3D::FrontCommandFailure() const {
+    return front ? &front->command_failure : nullptr;
+}
 
 namespace {
 
@@ -1753,6 +1758,7 @@ void Maxwell3D::FrontRunMacro(Core::System& system, VideoCommon::GpuSplit& split
         VideoCommon::Nx2Profile::Scope profile_scope{VideoCommon::Nx2Profile::Zone::Macro};
         engine.native_interpreter.active_dram = &native_data_ram;
         const auto parameter_count = fs.parameters.size();
+        const u64 command_generation = engine.native_code_generation;
         // The ordinary MacroEngine record hooks are bypassed on this path. No extra reads or
         // synchronization: save PRE front state and observe this invocation's real callbacks.
         static const char* const failure_prefix = std::getenv("EDEN_NX2_MME_FRONT_FAILURE");
@@ -1850,6 +1856,24 @@ void Maxwell3D::FrontRunMacro(Core::System& system, VideoCommon::GpuSplit& split
         fs.failure_capture_active = false;
         if (!result.success) {
             engine.native_execution_failed = true;
+            if (MmeCommandFailure::Armed()) {
+                auto& failure = fs.command_failure;
+                failure.serial =
+                    MmeCommandFailure::sequence.fetch_add(1, std::memory_order_relaxed) + 1;
+                failure.generation = command_generation;
+                failure.final_generation = engine.native_code_generation;
+                failure.method = method;
+                failure.start = start;
+                failure.pc = result.pc;
+                failure.error = result.error;
+                failure.consumed = result.consumed;
+                failure.parameter_count = parameter_count;
+                // Execution may append DMA words, but never overwrites the original FIFO prefix.
+                failure.parameters.assign(
+                    fs.parameters.begin(),
+                    fs.parameters.begin() +
+                        std::min(parameter_count, MmeCommandFailure::MaxParameters));
+            }
             LOG_ERROR(
                 HW_GPU,
                 "Native MME (split front) failed: start={:#x}, consumed={}/{}, pc={:#x}, error={}",

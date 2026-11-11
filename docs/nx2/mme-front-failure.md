@@ -86,3 +86,49 @@ locates the first divergent or unavailable observation. An interpreter error or 
 can expose a mismatch before a cap, but a matching truncated prefix never passes. Even matching
 step-limit errors cannot prove equivalent termination because the budgets count different work.
 The recorded JIT trace is the reference; this helper does not compile a substitute JIT configuration.
+
+## Join a failure to its parsed GPFIFO entry
+
+For a separate, one-shot command-provenance snapshot, set an existing local output directory:
+
+```powershell
+$env:EDEN_NX2_MME_COMMAND_FAILURE = 'C:/local-investigation/mme-command'
+```
+
+This observes only native Maxwell macros executed synchronously on the split front. It does not
+observe a macro delegated to the back or a non-split execution. It writes the first such failure
+in the process and disarms even if writing fails. Leave the variable unset for normal use.
+There is no start filter, so the output contains its own actual macro method, start, code
+generation, original parameter count/list, consumed count and error. The failure serial is owned
+by the front; capture never reads or resets the shared `native_execution_failed` flag.
+
+Immediately before the final `FrontCallMethod`/`FrontCallMultiMethod`, the observer copies the
+exact currently parsed span and the matching part of the already-existing submission snapshot.
+Only a synchronous failed return saves them. There is no MemoryManager/GPU reread or added
+synchronization: only the existing CPU parser/submission views are copied before the call.
+There is no added drain, retry or execution-budget change. Copying and serialization can still
+perturb diagnostic timing, including on successful calls while the diagnostic is armed.
+
+Each timestamp-suffixed output has native-endian, headerless u32 files:
+
+| Suffix | Contents |
+|---|---|
+| `.parsed` | At most 65,536 words from the actual parser span, in a window containing the triggering call |
+| `.submitted` | At most 65,536 matching entry words from the existing submit-time snapshot; empty if absent/deferred |
+| `.parameters` | Up to 4096 original failed-macro parameters, copied before the front clears the FIFO |
+| `.call` | Up to 4096 arguments supplied by the current triggering parser call (an inline argument is decoded) |
+| `.txt` | Header raw/address/size/index, source path, span/window/trigger offsets and counts, DMA state, engine/subchannel, snapshot/suspension/resume flags, parked-method context and actual failure identity |
+
+Offsets ending in `word` are u32 word offsets within the GPFIFO entry; `dma_word_offset` is
+the engine's existing byte offset. Inline commands deliberately use a synthetic engine DMA
+address, so use `call_entry_word` and `inline_argument` to locate their raw command instead.
+For a resumed entry, `parsed_span_entry_word` locates the observed tail; earlier entry words
+are not reconstructed. Prefetched lists have no GPFIFO entry header and say so explicitly.
+
+Counts expose every cap and missing submitted window. Parameters can have been assembled
+across earlier packets or entries. `parameter_provenance=current-call` is emitted only when
+the complete original parameter list exactly equals the complete triggering call's arguments;
+otherwise provenance is `partial`. No earlier-entry history is invented. A matching current
+entry alone does not establish where earlier parameters came from. The PRE parser/call copies
+can differ from a guest-memory-backed span later read by the macro; comparison with the actual
+failed invocation's `.parameters` identifies that difference. Keep all outputs local.
