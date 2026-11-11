@@ -61,3 +61,28 @@ For offline diagnosis, restore the PRE code, original parameters and data RAM, s
 ordered reads/DMA values, and compare JIT and interpreter termination, ordered writes and final
 data RAM. Do not replay effects into the live emulator. Their dispatch/instruction budgets count
 different work; a higher budget or a blind retry is not a control-flow fix.
+
+## Offline interpreter comparison
+
+`tools/nx2/mme_failure_replay.cpp` uses the actual production `TuringMacroInterpreter` header
+and only the C++ standard library. In a Visual Studio C++ developer shell, from the repository:
+
+```powershell
+cl /nologo /std:c++20 /EHsc /O2 /W4 /WX /Isrc tools/nx2/mme_failure_replay.cpp /Fe:mme-failure-replay.exe
+./mme-failure-replay.exe 'C:/local-investigation/mme-failure-TIMESTAMP'
+python tools/nx2/test_mme_failure_replay.py ./mme-failure-replay.exe
+```
+
+Pass the common capture prefix, without a suffix. The helper restores original code, parameters
+and data RAM; checks ordered read/emit callbacks against their recorded addresses/values;
+applies only the captured actual DMA words to FIFO/data RAM; and compares completed data RAM,
+FIFO and termination. It never accesses a GPU, injects effects into an emulator, or fills missing
+reads with zero. Changed code generation, truncated original parameters and exhausted observations
+are explicit context gaps. Final data RAM is compared only when the interpreter returns.
+
+Stdout is JSON. Exit codes are 0 for a complete observation match, 1 for a mismatch, 2 for missing
+context, 3 for an inconclusive budget comparison, and 4 for invalid input. `matched_event_prefix`
+locates the first divergent or unavailable observation. An interpreter error or early termination
+can expose a mismatch before a cap, but a matching truncated prefix never passes. Even matching
+step-limit errors cannot prove equivalent termination because the budgets count different work.
+The recorded JIT trace is the reference; this helper does not compile a substitute JIT configuration.
