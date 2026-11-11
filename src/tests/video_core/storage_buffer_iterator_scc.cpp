@@ -175,7 +175,7 @@ TEST_CASE("Connected iterator SCCs retain both stride words",
     const auto inner_next = ir.IAdd(IR::U32{IR::Value{inner}}, fixture.Word(ir, 0x210));
     inner->AddPhiOperand(&fixture.loop, ir.Select(condition, inner_next,
                                                   joined_cycle ? IR::Value{outer} : ir.Imm32(0)));
-    const auto outer_next = ir.IAdd(IR::U32{IR::Value{outer}}, fixture.Word(ir, 0x200));
+    const IR::Value outer_next = ir.IAdd(IR::U32{IR::Value{outer}}, fixture.Word(ir, 0x200));
     outer->AddPhiOperand(&fixture.loop,
                          ir.Select(condition, reverse_edges ? IR::Value{inner} : outer_next,
                                    reverse_edges ? outer_next : IR::Value{inner}));
