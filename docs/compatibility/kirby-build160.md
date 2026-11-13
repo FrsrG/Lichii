@@ -623,6 +623,14 @@ Waveflow is a conditional pass using the same snapshot/depth/flush settings,
 the warmed local cache and restart recovery for readable menus. The first-use
 run remains a performance failure and is not rewritten as a pass.
 
+Run 29 completed Airtopia Ruins' default two laps and closed cleanly with zero
+MME-limit errors/device losses. Its first-use performance gate failed on one
+5.13 FPS window. That interval overlaps 34 newly observed compute-pipeline
+preparations; subsequent windows recovered to 41–59 FPS with little/no new
+pipeline work. Preparation timings do not fully explain the long frame waits.
+One unchanged warmed repeat is justified; Airtopia and all later courses remain
+unqualified until the full performance gate is met.
+
 | Check | Result |
 | --- | --- |
 | Unmodified build-160 startup | Stack overflow reproduced |
