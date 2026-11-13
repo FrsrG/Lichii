@@ -72,6 +72,18 @@ index. This narrows the next inspection to the exact consumed records rather
 than assuming that an entire storage binding is bad. The actual material
 contents and GPU-produced vertex positions remain separate unknowns.
 
+The selected unit-quad region has now been identified in both visible and
+affected evidence. Run 49's good GPU buffer copy contains four unit-quad
+vertices and six valid indices. The initial GPU-memory snapshots in both
+affected run 44 captures instead contain malformed vertices and six zero
+indices at that same physical region. No recorded copy or fill repairs the
+60 bytes in those frames. Earlier compute/graphics writes are not completely
+excluded, so initial snapshots must not be presented as final consumed bytes.
+A bounded, default-off CPU-side region trace records guest bytes, normal
+upload decisions, ownership marks, buffer copies and download landings without
+adding GPU readbacks or synchronization. It is intended to distinguish bad
+guest data from stale GPU contents on the next controlled reproduction.
+
 A focused tool review found a matching NVIDIA opaque-address replay failure
 in [RenderDoc issue 3880](https://github.com/baldurk/renderdoc/issues/3880), but
 no general documented repair for these existing captures. Repeating the
