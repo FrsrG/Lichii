@@ -1188,6 +1188,87 @@ void RasterizerVulkan::PrepareDraw(bool is_indexed, Func&& draw_func, bool is_in
         mesh_emulation_vertices_per_group = pipeline->MeshEmulationVerticesPerGroup();
     }
     std::scoped_lock lock{buffer_cache.mutex, texture_cache.mutex};
+    static const bool static_quad_refresh = [] {
+        const char* value = std::getenv("EDEN_NX2_STATIC_UI_QUAD_REFRESH");
+        return value && std::string_view{value} == "1";
+    }();
+    bool static_quad_refreshed = false;
+    // Diagnostic control for the one decoded native UI layout, not a general buffer repair.
+    if (static_quad_refresh && Settings::GetCurrentProgramID() == 0x040077201BE50000ULL &&
+        pipeline->ShaderHashes()[1] == 0xe406adca8a4b9a53ULL) {
+        const auto& draw = maxwell3d->draw_manager.draw_state;
+        const auto skip = [&](u32 reason, std::string_view text) {
+            static std::array<u32, 6> counts{};
+            if (++counts[reason] <= 2) {
+                LOG_WARNING(Render_Vulkan, "Static UI quad diagnostic skipped: {} (reason={} count={})",
+                            text, reason, counts[reason]);
+            }
+        };
+        const auto refresh = [&] {
+            if (!is_indexed || is_indirect || draw.index_buffer.count != 6 ||
+                draw.index_buffer.format != Maxwell::IndexFormat::UnsignedShort ||
+                draw.index_buffer.first != 0 || draw.base_index != 0) {
+                skip(0, "draw shape does not match");
+                return false;
+            }
+            const auto mapped_range = [&](GPUVAddr address, u64 size) -> std::optional<u64> {
+                if (address > (std::numeric_limits<u64>::max)() - (size - 1) ||
+                    !gpu_memory->IsFullyMappedRange(address, size)) {
+                    return std::nullopt;
+                }
+                const auto begin = gpu_memory->GpuToCpuAddress(address);
+                const auto end = gpu_memory->GpuToCpuAddress(address + size - 1);
+                return begin && end && *end == *begin + size - 1 ? begin : std::nullopt;
+            };
+            const auto& cb = maxwell3d->state.shader_stages[0].const_buffers[0];
+            if (!cb.enabled || cb.size < 0x118 ||
+                cb.address > (std::numeric_limits<u64>::max)() - 0x110) {
+                skip(1, "vertex CBuf0 unavailable");
+                return false;
+            }
+            const auto pointer_address = mapped_range(cb.address + 0x110, 8);
+            if (!pointer_address) {
+                skip(1, "vertex CBuf0 pointer is not linearly mapped");
+                return false;
+            }
+            GPUVAddr geometry{};
+            device_memory.ReadBlockUnsafe(*pointer_address, &geometry, sizeof(geometry));
+            const auto device_address = mapped_range(geometry, 60);
+            const auto index_address = mapped_range(draw.index_buffer.StartAddress(), 12);
+            if (!device_address || !index_address || *index_address != *device_address + 48) {
+                skip(2, "geometry/index mappings do not describe one contiguous quad");
+                return false;
+            }
+            static constexpr std::array<u32, 15> expected{
+                0, 0, 0, 0x3f800000, 0, 0, 0x3f800000, 0x3f800000, 0,
+                0, 0x3f800000, 0, 0x00010000, 0x00030002, 0x00020000};
+            std::array<u32, 15> bytes{};
+            device_memory.ReadBlockUnsafe(*device_address, bytes.data(), sizeof(bytes));
+            if (bytes != expected) {
+                skip(3, "CPU geometry/index bytes do not match the static unit quad");
+                return false;
+            }
+            if (!buffer_cache.IsRegionGpuModified(*device_address, sizeof(bytes))) {
+                skip(4, "exact quad range is not GPU-owned");
+                return false;
+            }
+            const std::span<const u8> source{reinterpret_cast<const u8*>(bytes.data()), sizeof(bytes)};
+            if (!buffer_cache.DebugRefreshGpuOwnedRange(*device_address, source)) {
+                skip(5, "no existing host buffer covers the GPU-owned quad");
+                return false;
+            }
+            static u64 repairs{};
+            if (++repairs <= 4) {
+                LOG_WARNING(Render_Vulkan,
+                            "Static UI quad diagnostic repaired: title={:016x} shader={:016x} "
+                            "gpu={:#x} device={:#x} bytes={} count={} frame={} (first 4 repairs)",
+                            Settings::GetCurrentProgramID(), pipeline->ShaderHashes()[1], geometry,
+                            *device_address, source.size(), repairs, render_trace_frame);
+            }
+            return true;
+        };
+        static_quad_refreshed = refresh();
+    }
     // What the next draw's TakeReusableDraw compares with, read once the caches are locked: a
     // break from here on, this draw's own resolve included, ends the delta chain.
     const u64 draw_serial = FastDraw::Serial();
@@ -1207,7 +1288,8 @@ void RasterizerVulkan::PrepareDraw(bool is_indexed, Func&& draw_func, bool is_in
         }
     }
     const bool delta_holds =
-        delta_pipeline != nullptr && DeltaStillHolds(draw_serial, draw_map_serial);
+        !static_quad_refreshed && delta_pipeline != nullptr &&
+        DeltaStillHolds(draw_serial, draw_map_serial);
     const DrawPath path = delta_holds && !verify_pipeline ? DrawPath::Delta : DrawPath::Full;
     buffer_cache.BeginGraphicsUniforms(path == DrawPath::Delta ? &taken_delta : nullptr);
     if (path == DrawPath::Delta) {

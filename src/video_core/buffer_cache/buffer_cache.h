@@ -3962,6 +3962,45 @@ void BufferCache<P>::MappedUploadMemory([[maybe_unused]] Buffer& buffer,
 }
 
 template <class P>
+bool BufferCache<P>::DebugRefreshGpuOwnedRange(DAddr dest_address, std::span<const u8> bytes) {
+    if constexpr (!USE_MEMORY_MAPS_FOR_UPLOADS) {
+        return false;
+    } else {
+        if (bytes.empty() || bytes.size() > 64 || dest_address % 4 != 0 || bytes.size() % 4 != 0 ||
+            !gpu_modified_ranges.Intersects(dest_address, bytes.size())) {
+            return false;
+        }
+        Buffer* target = nullptr;
+        BufferId target_id{};
+        ForEachBufferInRange(dest_address, bytes.size(), [&](BufferId id, Buffer& buffer) {
+            if (dest_address >= buffer.CpuAddr() &&
+                dest_address - buffer.CpuAddr() <= buffer.SizeBytes() &&
+                bytes.size() <= buffer.SizeBytes() - (dest_address - buffer.CpuAddr())) {
+                target = &buffer;
+                target_id = id;
+            }
+        });
+        if (!target) {
+            return false;
+        }
+        auto upload = runtime.UploadStagingBuffer(bytes.size());
+        std::memcpy(upload.mapped_span.data(), bytes.data(), bytes.size());
+        const std::array copies{BufferCopy{
+            .src_offset = upload.offset,
+            .dst_offset = target->Offset(dest_address),
+            .size = bytes.size(),
+        }};
+        ClearReplacedDownload(dest_address, bytes.size());
+        gpu_modified_ranges.Subtract(dest_address, bytes.size());
+        MarkVertexBuffersStale(dest_address, bytes.size());
+        TouchBuffer(*target, target_id);
+        target->MarkUsage(target->Offset(dest_address), bytes.size());
+        runtime.CopyBuffer(target->Handle(), upload.buffer, copies, true, false);
+        return true;
+    }
+}
+
+template <class P>
 bool BufferCache<P>::InlineMemory(DAddr dest_address, size_t copy_size,
                                   std::span<const u8> inlined_buffer) {
     const bool is_dirty = IsRegionRegistered(dest_address, copy_size);

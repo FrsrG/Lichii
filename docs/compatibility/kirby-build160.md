@@ -100,6 +100,17 @@ results. The next diagnostic reads bound buffers after the draw, with explicit
 index/host-binding metadata, to avoid a pre-draw readback repairing the very
 input being investigated. No rendering fix is claimed or installed.
 
+Run 60 closes that binding/data gap in an affected captured frame. Its main UI
+target remains exactly `(0,0,0,1)` after 31 draws, and the post-capture racing
+image still has no HUD. The first captured UI draw's valid, epoch-matched
+Vulkan index binding addresses the same host buffer as its geometry dump,
+48 bytes into the payload. All six GPU-side indices are zero; the selected
+guest-memory quad remains valid. Those indices produce degenerate triangles.
+This establishes host/guest divergence for the actual failing draw, while the
+earlier GPU writer remains unknown. A guarded refresh of only the recognized
+static UI quad is the next causal workaround test, not a claim that the
+underlying GPU writer has been fixed.
+
 A focused tool review found a matching NVIDIA opaque-address replay failure
 in [RenderDoc issue 3880](https://github.com/baldurk/renderdoc/issues/3880), but
 no general documented repair for these existing captures. Repeating the
