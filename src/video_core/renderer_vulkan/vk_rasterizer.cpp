@@ -954,6 +954,30 @@ void RasterizerVulkan::PrepareDraw(bool is_indexed, Func&& draw_func, bool is_in
         }
         return;
     }
+    // Exact shader dependency test, off by default. This omits draws, not shader instructions.
+    static const u64 skip_geometry_hash = [] {
+        const char* value = std::getenv("EDEN_NX2_SKIP_GS_HASH");
+        if (!value || !*value) {
+            return u64{};
+        }
+        char* end{};
+        const u64 hash = std::strtoull(value, &end, 16);
+        return end != value && *end == '\0' ? hash : u64{};
+    }();
+    if (skip_geometry_hash != 0 && pipeline->ShaderHashes()[4] == skip_geometry_hash) {
+        static u32 reported{};
+        if (reported++ < 4) {
+            const auto& draw = maxwell3d->draw_manager.draw_state;
+            LOG_WARNING(Render_Vulkan,
+                        "Diagnostic geometry exclusion: hash={:016x} indexed={} indirect={} count={} "
+                        "pipeline={:016x}",
+                        skip_geometry_hash, is_indexed, is_indirect,
+                        is_indexed ? draw.index_buffer.count : draw.vertex_buffer.count,
+                        fmt::join(pipeline->ShaderHashes(), ","));
+        }
+        report_failure("EDEN_NX2_SKIP_GS_HASH");
+        return;
+    }
     if (VideoCommon::OotNetwork::BypassEnabled(Settings::GetCurrentProgramID())) {
         TrackOotTonemappedImage(*pipeline);
     }

@@ -531,6 +531,32 @@ another broad macro or settings experiment is not justified by this capture.
 The owned process exited unexpectedly, and the portable global profile was
 restored exactly. This is a verified crash-capture milestone, not a course pass.
 
+Geometry-only replay of 14 distinct cached guest programs finds one strong
+structural match, guest hash `4b8d64d0576e9e5d`: the complete 561-label,
+two-loop control-flow topology matches, as do 5,308 ordered core opcodes after
+explicitly lossy removal of profile-sensitive operations. Other candidates
+differ. Runtime profile/linkage differences prevent an exact binary match;
+the association is strong but remains structural. The native bytes also match
+a preserved local shader capture. Points expanded to at most eight strip
+vertices, no geometry-stage texture operations and storage-buffer inputs are
+consistent with particles/billboards/ribbons; visual role remains an inference.
+
+The exact captured SPIR-V validates with its actual version/features. Both
+loops have safety counters, and ordinary nonnegative input counts bound the
+two loops to four/eight iterations. A negative storage-derived count could
+exercise the longer safety-bound path, but that input is not established in
+the captured draw. No translation correction is justified by these facts alone.
+
+`EDEN_NX2_SKIP_GS_HASH=<hex hash>` is a default-off dependency diagnostic that
+omits only draws using the selected guest geometry hash. It logs its first
+four matches and follows the existing draw-failure early exit before pipeline
+configuration. This is neither an instruction rewrite nor a confirmed fix.
+The changed Vulkan object compiles. The proposed single normal-speed Floria
+test disables Aftermath and requires observed selector hits, full finish and
+course navigation, at least 30 FPS, and usable track/rider/obstacle visibility.
+Essential missing geometry invalidates the workaround; minor omitted effects
+must be named. A non-matching selector or another crash cannot qualify it.
+
 ## Acceptance record
 
 | Check | Result |
