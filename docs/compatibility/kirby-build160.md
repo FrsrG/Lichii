@@ -70,7 +70,8 @@ CPU-only capture inspection also recovers the actual bound uniform bytes for
 an affected UI draw, including its geometry/material pointers and instance
 index. This narrows the next inspection to the exact consumed records rather
 than assuming that an entire storage binding is bad. The actual material
-contents and GPU-produced vertex positions remain separate unknowns.
+initial contents have sane transforms/opacity; the values consumed by the GPU
+and resulting vertex positions remain separate unknowns.
 
 The selected unit-quad region has now been identified in both visible and
 affected evidence. Run 49's good GPU buffer copy contains four unit-quad
@@ -83,6 +84,21 @@ A bounded, default-off CPU-side region trace records guest bytes, normal
 upload decisions, ownership marks, buffer copies and download landings without
 adding GPU readbacks or synchronization. It is intended to distinguish bad
 guest data from stale GPU contents on the next controlled reproduction.
+
+Run 56 confirms that valid quad data is staged for upload, but its trace budget
+was exhausted by alternating binding metadata before the race. Commit
+`ac05a094` fixes that diagnostic bookkeeping. Run 57 then reproduces HUD loss
+and the black post-race screen with a healthy trace budget: the selected guest
+quad is still valid in a sample taken after the HUD disappears. No corruption
+or download landing is observed for that guest region. Early index overlap is
+confirmed, but the exact late failing draw's binding still needs correlation.
+
+Clean-workload controls 58 and 59 reject a global memory barrier and a full GPU
+wait before the selected UI shader as sufficient fixes. Both still lose the
+racing HUD. No further broad synchronization experiment is justified by these
+results. The next diagnostic reads bound buffers after the draw, with explicit
+index/host-binding metadata, to avoid a pre-draw readback repairing the very
+input being investigated. No rendering fix is claimed or installed.
 
 A focused tool review found a matching NVIDIA opaque-address replay failure
 in [RenderDoc issue 3880](https://github.com/baldurk/renderdoc/issues/3880), but

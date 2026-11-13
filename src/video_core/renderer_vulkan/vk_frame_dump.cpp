@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <bit>
 #include <charconv>
 #include <cmath>
 #include <cstdlib>
@@ -78,6 +79,14 @@ const BufferShaderFilter& GetBufferShaderFilter() {
         }
     }();
     return filter;
+}
+
+bool MatchesBufferShaderFilter(std::span<const u64> hashes) {
+    const auto& filter = GetBufferShaderFilter();
+    return !filter.enabled ||
+           (filter.valid && std::ranges::any_of(hashes, [&](u64 hash) {
+                return std::ranges::find(filter.hashes, hash) != filter.hashes.end();
+            }));
 }
 
 template <typename T>
@@ -507,13 +516,17 @@ void FrameDump::NoteDispatchSampled(u64 shader_hash, std::span<const Sampled> te
     }
 }
 
+bool FrameDump::BuffersAfterDraw() noexcept {
+    static const bool enabled = [] {
+        const char* value = std::getenv("EDEN_NX2_FRAME_DUMP_BUFFERS_AFTER_DRAW");
+        return value && std::string_view{value} == "1";
+    }();
+    return enabled;
+}
+
 bool FrameDump::NoteBuffers(bool compute, std::span<const u64> shader_hashes,
                             std::span<BoundBuffer> buffers) {
-    const auto& filter = GetBufferShaderFilter();
-    if (filter.enabled &&
-        (!filter.valid || !std::ranges::any_of(shader_hashes, [&](u64 hash) {
-            return std::ranges::find(filter.hashes, hash) != filter.hashes.end();
-        }))) {
+    if (!MatchesBufferShaderFilter(shader_hashes)) {
         return false;
     }
     bool recorded = false;
@@ -531,10 +544,12 @@ bool FrameDump::NoteBuffers(bool compute, std::span<const u64> shader_hashes,
                     : fmt::format(R"("pass":{},"draw":{})", pass_index, draws - 1);
         const bool from_host = buffer.guest.empty();
         std::string tags = fmt::format(
-            R"("kind":"buffer",{},"stage":{},"shader":"{:016x}","type":"{}","index":{},"written":{},"gpu_addr":"{:#x}","device_addr":"{:#x}","bound_size":{},"size":{},"gpu_modified":{},"source":"{}")",
+            R"("kind":"buffer",{},"stage":{},"shader":"{:016x}","type":"{}","index":{},"written":{},"gpu_addr":"{:#x}","device_addr":"{:#x}","bound_size":{},"size":{},"gpu_modified":{},"source":"{}","timing":"{}","host_buffer":"{:#x}","host_offset":{})",
             owner, buffer.stage, shader, buffer.storage ? "storage" : "uniform", buffer.index,
             buffer.written, buffer.gpu_addr, buffer.device_addr, buffer.bound_size, buffer.size,
-            buffer.gpu_modified, from_host ? "host" : "guest");
+            buffer.gpu_modified, from_host ? "host" : "guest",
+            compute ? "before_dispatch" : (BuffersAfterDraw() ? "after_draw" : "before_draw"),
+            std::bit_cast<u64>(buffer.host), buffer.host_offset);
         if (!from_host) {
             Enqueue({.tags = std::move(tags), .data = std::move(buffer.guest), .raw = true});
             continue;
@@ -542,6 +557,26 @@ bool FrameDump::NoteBuffers(bool compute, std::span<const u64> shader_hashes,
         recorded |= RecordBuffer(buffer.host, buffer.host_offset, buffer.size, std::move(tags));
     }
     return recorded;
+}
+
+void FrameDump::NoteIndexBinding(std::span<const u64> shader_hashes,
+                                const IndexBinding& binding) {
+    if (!CapturingBuffers() || !MatchesBufferShaderFilter(shader_hashes)) {
+        return;
+    }
+    std::string shaders;
+    for (const u64 hash : shader_hashes) {
+        shaders += fmt::format("{}\"{:016x}\"", shaders.empty() ? "" : ",", hash);
+    }
+    Enqueue({.tags = fmt::format(
+        R"({{"kind":"index_binding","pass":{},"draw":{},"shaders":[{}],"timing":"draw_recorded","direct":true,"gpu_addr":"{:#x}","device_addr":{},"native_first":{},"native_count":{},"native_base_index":{},"native_format":{},"first_index":{},"count":{},"base_vertex":{},"base_instance":{},"instances":{},"host_buffer":"{:#x}","host_offset":{},"host_type":{},"cache_valid":{},"cached_epoch":{},"recording_epoch":{},"epoch_matches":{}}})",
+        pass_index, draws - 1, shaders, binding.gpu_addr,
+        binding.device_addr ? fmt::format("\"{:#x}\"", *binding.device_addr) : "null",
+        binding.native_first, binding.native_count, binding.native_base_index, binding.native_format,
+        binding.first, binding.count, binding.base_vertex, binding.base_instance, binding.instances,
+        std::bit_cast<u64>(binding.host), binding.host_offset, static_cast<u32>(binding.host_type),
+        binding.cache_valid, binding.cached_epoch, binding.recording_epoch,
+        binding.cached_epoch == binding.recording_epoch)});
 }
 
 void FrameDump::NoteLaunch(u64 shader_hash, const std::array<u32, 3>& grid,
@@ -936,8 +971,9 @@ void FrameDump::TickFrame() {
             hashes += fmt::format("{}\"{:016x}\"", hashes.empty() ? "" : ",", hash);
         }
         manifest << fmt::format(
-                        R"({{"kind":"buffer_filter","enabled":{},"valid":{},"match":"any_pipeline_stage","scope":"all_bound_stages","hashes":[{}]}})",
-                        filter.enabled, filter.valid, hashes)
+                        R"({{"kind":"buffer_filter","enabled":{},"valid":{},"match":"any_pipeline_stage","scope":"all_bound_stages","hashes":[{}],"graphics_timing":"{}","index_metadata":"direct_indexed_only"}})",
+                        filter.enabled, filter.valid, hashes,
+                        BuffersAfterDraw() ? "after_draw" : "before_draw")
                  << '\n';
     }
     writer = std::thread{[this] { WriterLoop(); }};

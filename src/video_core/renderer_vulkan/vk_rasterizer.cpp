@@ -1254,7 +1254,7 @@ void RasterizerVulkan::PrepareDraw(bool is_indexed, Func&& draw_func, bool is_in
             }
             recorded = frame_dump.NoteSampled(sampled);
         }
-        if (frame_dump.CapturingBuffers()) {
+        if (frame_dump.CapturingBuffers() && !FrameDump::BuffersAfterDraw()) {
             recorded |= FrameDumpBuffers(false, pipeline->ShaderHashes());
         }
         if (recorded) {
@@ -1291,7 +1291,10 @@ void RasterizerVulkan::PrepareDraw(bool is_indexed, Func&& draw_func, bool is_in
         Profile::Scope scope{Profile::Zone::DrawRecord};
         scheduler.TraceGraphicsPipeline(pipeline->ShaderHashes());
         trace_draw_hashes = {pipeline->ShaderHashes()[1], pipeline->ShaderHashes()[5]};
-        draw_func();
+        draw_func(pipeline->ShaderHashes());
+    }
+    if (frame_dump.CapturingBuffers() && FrameDump::BuffersAfterDraw()) {
+        FrameDumpBuffers(false, pipeline->ShaderHashes());
     }
     submitted = true;
     buffer_cache.NoteWorkRecorded(false);
@@ -1615,7 +1618,7 @@ void RasterizerVulkan::Draw(bool is_indexed, u32 instance_count) {
         gpu.TickWork();
         return;
     }
-    PrepareDraw(is_indexed, [this, is_indexed, instance_count] {
+    PrepareDraw(is_indexed, [this, is_indexed, instance_count](std::span<const u64> shader_hashes) {
         const auto& draw_state = maxwell3d->draw_manager.draw_state;
         const u32 num_instances{instance_count};
         const DrawParams draw_params{MakeDrawParams(draw_state, num_instances, is_indexed)};
@@ -1686,6 +1689,30 @@ void RasterizerVulkan::Draw(bool is_indexed, u32 instance_count) {
                 });
         });
 
+        if (frame_dump.CapturingBuffers() && draw_params.is_indexed) {
+            const auto& native = draw_state.index_buffer;
+            const auto index = buffer_cache_runtime.DebugIndexBinding();
+            frame_dump.NoteIndexBinding(
+                shader_hashes,
+                {.gpu_addr = native.StartAddress(),
+                 .device_addr = gpu_memory->GpuToCpuAddress(native.StartAddress()),
+                 .native_first = draw_state.index_buffer.first,
+                 .native_count = draw_state.index_buffer.count,
+                 .native_base_index = draw_state.base_index,
+                 .native_format = static_cast<u32>(native.format),
+                 .first = draw_params.first_index,
+                 .count = draw_params.num_vertices,
+                 .base_vertex = static_cast<s32>(draw_params.base_vertex),
+                 .base_instance = draw_params.base_instance,
+                 .instances = draw_params.num_instances,
+                 .host = index.buffer,
+                 .host_offset = index.offset,
+                 .host_type = index.type,
+                 .cached_epoch = index.epoch,
+                 .recording_epoch = scheduler.RecordingEpoch(),
+                 .cache_valid = index.valid});
+        }
+
         // Log draw call
         if (GPU::Logging::IsActive() &&
             Settings::values.gpu_log_vulkan_calls.GetValue()) {
@@ -1712,7 +1739,7 @@ void RasterizerVulkan::DrawIndirect() {
         ++trace_indirect;
     }
     buffer_cache.SetDrawIndirect(&params);
-    PrepareDraw(params.is_indexed, [this, &params] {
+    PrepareDraw(params.is_indexed, [this, &params](std::span<const u64>) {
         if (VideoCommon::RenderTrace::SampleFrame(render_trace_frame) && render_trace_draws <= 2048) {
             LOG_DEBUG(Render_Vulkan,
                       "Render trace indirect: frame={} draw={} address={:#x} count_address={:#x} "

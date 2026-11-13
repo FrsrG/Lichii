@@ -14,6 +14,7 @@
 #include "video_core/buffer_cache/memory_tracker_base.h"
 #include "video_core/buffer_cache/usage_tracker.h"
 #include "video_core/engines/maxwell_3d.h"
+#include "video_core/nx2_perf.h"
 #include "video_core/renderer_vulkan/vk_compute_pass.h"
 #include "video_core/renderer_vulkan/vk_multi_range_buffer.h"
 #include "video_core/renderer_vulkan/vk_staging_buffer_pool.h"
@@ -185,6 +186,20 @@ public:
 
     void BindIndexBuffer(PrimitiveTopology topology, IndexFormat index_format, u32 num_indices,
                          u32 base_vertex, VkBuffer buffer, u32 offset, u32 size);
+
+    struct DebugIndexBindingState {
+        VkBuffer buffer;
+        VkDeviceSize offset;
+        VkIndexType type;
+        u64 epoch;
+        bool valid;
+    };
+
+    /// The ordinary binding cache; conversion helpers and PERF_VERIFY can leave it invalid.
+    [[nodiscard]] DebugIndexBindingState DebugIndexBinding() const noexcept {
+        return {bound_index_buffer, bound_index_offset, bound_index_type, bound_index_epoch,
+                bound_index_valid && !VideoCommon::Nx2Perf::Verify()};
+    }
 
     void BindQuadIndexBuffer(PrimitiveTopology topology, u32 first, u32 count);
 

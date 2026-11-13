@@ -120,6 +120,26 @@ public:
         std::vector<u8> guest;
     };
 
+    struct IndexBinding {
+        GPUVAddr gpu_addr;
+        std::optional<u64> device_addr;
+        u32 native_first;
+        u32 native_count;
+        u32 native_base_index;
+        u32 native_format;
+        u32 first;
+        u32 count;
+        s32 base_vertex;
+        u32 base_instance;
+        u32 instances;
+        VkBuffer host;
+        VkDeviceSize host_offset;
+        VkIndexType host_type;
+        u64 cached_epoch;
+        u64 recording_epoch;
+        bool cache_valid;
+    };
+
     explicit FrameDump(const Device& device, MemoryAllocator& memory_allocator,
                        Scheduler& scheduler);
     ~FrameDump();
@@ -136,6 +156,8 @@ public:
         return schedule.Capturing() && schedule.Buffers();
     }
 
+    [[nodiscard]] static bool BuffersAfterDraw() noexcept;
+
     /// Reads back the textures of the current draw not yet seen in this pass. Returns true when
     /// copies were recorded, which ends the current render pass.
     bool NoteSampled(std::span<const Sampled> textures);
@@ -145,6 +167,9 @@ public:
     /// to run not yet seen for their shader. Returns true when copies were recorded.
     bool NoteBuffers(bool compute, std::span<const u64> shader_hashes,
                      std::span<BoundBuffer> buffers);
+    /// Metadata for a direct indexed draw; the host fields describe the binding cache, which
+    /// does not cover every index conversion path. No GPU work is recorded here.
+    void NoteIndexBinding(std::span<const u64> shader_hashes, const IndexBinding& binding);
     /// Records the group counts of the dispatch about to run.
     void NoteLaunch(u64 shader_hash, const std::array<u32, 3>& grid,
                     const std::array<u32, 3>& block, std::optional<GPUVAddr> indirect,
