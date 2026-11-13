@@ -131,6 +131,29 @@ draw-written-page drain test also retained the errors, but its diagnostics
 showed only compute/copy-written list pages. The remaining work is to trace
 the parameter bytes to their command entry and correct the failing path.
 
+## Bounded command-origin diagnostic
+
+`EDEN_NX2_MME_FAILURE_DUMP=<local-directory>` enables a bounded diagnostic,
+not a recovery path. A first observed failure arms a following matching macro
+invocation; at most eight attempts retain initial code/FIFO/RAM and capped
+read, emit and DMA traces. Captured JIT state includes the actual failure PC.
+Trace completeness flags remain explicit when output exceeds the caps.
+
+The armed capture also records each argument's command-entry and accepted
+header context, GPU address when known, already-read word/neighbors and read
+path. Continued/parked methods retain header scalar context without retaining
+borrowed spans. Mutable submit snapshots are labeled current, not original.
+Unknown or capped provenance is not inferred. Synthetic loop/DMA capture
+checks and 19 bounded origin checks pass; a real capture reproduced the JIT
+state and input-driven loop offline. The new real command-origin fields still
+need gameplay capture validation.
+
+The separate diagnostic switch `EDEN_NX2_LIST_FORCE_FLUSH=1` bypasses staged
+GPU-written-list reads and uses the existing drain/flush fallback. It changes
+timing and is reserved for an evidence-directed comparison. Both diagnostics
+are off by default; no execution budget, interpreter semantics or gameplay
+parameters are changed.
+
 ## Acceptance record
 
 | Check | Result |

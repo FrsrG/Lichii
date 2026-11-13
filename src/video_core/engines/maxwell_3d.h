@@ -37,6 +37,7 @@ class System;
 
 namespace Tegra {
 class MemoryManager;
+struct DmaCommandOrigin;
 }
 
 namespace VideoCommon {
@@ -3213,9 +3214,11 @@ public:
     /// the front instead of CallMethod: runs macros and macro uploads against a copy of the
     /// registers and sends the register writes to the back thread.
     void FrontCallMethod(Core::System& system, VideoCommon::GpuSplit& split, u32 method,
-                         u32 argument, bool is_last_call);
+                         u32 argument, bool is_last_call, const DmaCommandOrigin* origin = nullptr);
     void FrontCallMultiMethod(Core::System& system, VideoCommon::GpuSplit& split, u32 method,
-                              const u32* base_start, u32 amount, u32 methods_pending);
+                              const u32* base_start, u32 amount, u32 methods_pending,
+                              const DmaCommandOrigin* origin = nullptr);
+    bool WantsMacroOrigin(u32 method);
 
     bool ShouldExecute() const {
         return execute_on;
@@ -3464,6 +3467,8 @@ private:
     void FrontWrite(VideoCommon::GpuSplit& split, FrontState& state, u32 method, u32 argument,
                     bool is_last_call, bool from_macro);
     void FrontRunMacro(Core::System& system, VideoCommon::GpuSplit& split, FrontState& state);
+    void FrontRecordOrigin(FrontState& state, u32 method, std::span<const u32> arguments,
+                           const DmaCommandOrigin* origin);
     bool FrontRunOnBack(Core::System& system, VideoCommon::GpuSplit& split, FrontState& state,
                         const MacroEngine& engine, u32 start);
     u32 FrontRegister(VideoCommon::GpuSplit& split, FrontState& state, u32 method);

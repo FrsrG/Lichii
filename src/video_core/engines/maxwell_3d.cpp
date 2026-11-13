@@ -21,6 +21,8 @@
 #include "common/settings.h"
 #include "core/core.h"
 #include "core/core_timing.h"
+#include "video_core/nx2_macro_failure_dump.h"
+#include "video_core/dma_pusher.h"
 #include "video_core/dirty_flags.h"
 #include "video_core/engines/maxwell_3d.h"
 #include "video_core/engines/maxwell_3d.h"
@@ -1132,6 +1134,8 @@ struct Maxwell3D::FrontState {
     Regs::ShadowRamControl control{};
     u32 executing_macro{};
     std::vector<u32> parameters;
+    VideoCommon::Nx2MacroFailure::Json parameter_origins;
+    bool origins_complete{true};
     u64 calls{};
     /// A method the draw manager handles was sent since the back last ran DrawDeferred: only
     /// then can it have a deferred instanced draw to issue at the end of a macro.
@@ -1481,13 +1485,101 @@ void Maxwell3D::FrontNoteReport(VideoCommon::GpuSplit& split, const FrontState& 
     }
 }
 
+bool Maxwell3D::WantsMacroOrigin(u32 method) {
+    const auto* gate = VideoCommon::Nx2MacroFailure::GetGate();
+    if (method < MacroRegistersStart || !gate ||
+        gate->phase.load(std::memory_order_acquire) != VideoCommon::Nx2MacroFailure::Armed)
+        return false;
+    const u32 active = front && front->executing_macro ? front->executing_macro : method;
+    auto& engine = GetNativeMacroEngine();
+    const auto positions = GetNativeMacroPositions();
+    const u32 start = positions[((active - MacroRegistersStart) >> 1) % positions.size()];
+    return VideoCommon::Nx2MacroFailure::ArmedFor(&engine, start, engine.native_code_generation);
+}
+
+void Maxwell3D::FrontRecordOrigin(FrontState& fs, u32 method,
+                                 std::span<const u32> arguments, const DmaCommandOrigin* origin) {
+    if (!WantsMacroOrigin(method)) return;
+    using Json = VideoCommon::Nx2MacroFailure::Json;
+    try {
+        if (fs.parameters.empty()) {
+            fs.parameter_origins = Json::array();
+            fs.origins_complete = true;
+        }
+        const size_t first = fs.parameters.size();
+        if (!fs.parameter_origins.is_array() || fs.parameter_origins.size() != first)
+            fs.origins_complete = false;
+        for (size_t i = 0; i < arguments.size(); ++i) {
+            if (first + i >= DmaCommandOrigin::MaxWords) {
+                fs.origins_complete = false;
+                break;
+            }
+            Json row{{"parameter_index", first + i}, {"argument", arguments[i]},
+                     {"origin_known", origin != nullptr}};
+            if (origin && i < origin->copied_words) {
+                const auto& e = origin->entry;
+                const auto& h = origin->header;
+                const size_t offset = origin->word_offset + (origin->inline_argument ? 0 : i);
+                row["channel"] = e.channel;
+                row["entry"] = {{"known", e.entry_known}, {"raw", e.entry_known ? Json(e.entry_raw) : Json(nullptr)},
+                    {"gpu_address", e.entry_known ? Json(e.entry_address) : Json(nullptr)},
+                    {"word_count", e.entry_words}, {"index", e.entry_index},
+                    {"read_path", e.read_path}, {"gpu_written", e.gpu_written},
+                    {"resume_word_offset", e.resume_offset}, {"parse_id", e.parse_id}};
+                row["accepted_header"] = {{"known", h.known},
+                    {"word", h.known ? Json(h.word) : Json(nullptr)},
+                    {"gpu_address", h.address_known ? Json(h.address) : Json(nullptr)},
+                    {"word_offset", h.word_offset}, {"parse_id", h.parse_id}, {"read_path", h.read_path},
+                    {"entry_raw", h.address_known ? Json(h.entry_raw) : Json(nullptr)},
+                    {"entry_gpu_address", h.address_known ? Json(h.entry_address) : Json(nullptr)},
+                    {"entry_index", h.entry_index}, {"entry_word_count", h.entry_words}};
+                row["word_offset"] = offset;
+                row["word_read_path"] = origin->read_paths[i] ? origin->read_paths[i] : "unknown";
+                row["source_gpu_address"] = origin->source_address_known ? Json(e.entry_address + offset * 4) : Json(nullptr);
+                row["argument_source"] = origin->inline_argument ? "header-inline-bitfield" : "parameter-word";
+                row["method"] = origin->method;
+                row["subchannel"] = origin->subchannel;
+                row["methods_remaining"] = origin->methods_remaining;
+                row["segment_words"] = origin->segment_words;
+                row["segment_word_index"] = i;
+                row["parsed_word"] = origin->raw_known[i] ? Json(origin->raw_words[i]) : Json(nullptr);
+                const bool snapshot_known = origin->snapshot_known[i];
+                row["current_snapshot"] = {{"label", "current mutable submitted_words snapshot; may have been refreshed"},
+                    {"word", snapshot_known ? Json(origin->snapshot_words[i]) : Json(nullptr)},
+                    {"snapshot_suspensions", e.snapshot_suspensions}, {"current_suspensions", e.current_suspensions},
+                    {"deferred", e.snapshot_deferred}};
+                Json snapshot_argument = nullptr;
+                if (snapshot_known) {
+                    const CommandHeader word{.argument = origin->snapshot_words[i]};
+                    if (!origin->inline_argument) snapshot_argument = word.argument;
+                    else if (word.mode == SubmissionMode::Inline) snapshot_argument = u32{word.arg_count};
+                }
+                row["current_snapshot"]["argument"] = snapshot_argument;
+                row["neighbors"] = {{"origin", "already-read current entry"},
+                    {"begin_word_offset", origin->neighbor_begin},
+                    {"words", std::vector<u32>(origin->neighbors.begin(), origin->neighbors.begin() + origin->neighbor_count)}};
+                row["header_neighbors"] = {{"origin", "accepted header in same parse only; empty when retained across entry/resume"},
+                    {"begin_word_offset", origin->header_neighbor_begin},
+                    {"words", std::vector<u32>(origin->header_neighbors.begin(), origin->header_neighbors.begin() + origin->header_neighbor_count)}};
+                if (!h.known || !origin->raw_known[i]) fs.origins_complete = false;
+            } else {
+                fs.origins_complete = false;
+            }
+            fs.parameter_origins.push_back(std::move(row));
+        }
+    } catch (...) {
+        fs.origins_complete = false;
+    }
+}
+
 void Maxwell3D::FrontCallMethod(Core::System& system, VideoCommon::GpuSplit& split, u32 method,
-                                u32 argument, bool is_last_call) {
+                                u32 argument, bool is_last_call, const DmaCommandOrigin* origin) {
     auto& fs = Front(system, split);
     if (method >= MacroRegistersStart) {
         if (fs.executing_macro == 0) {
             fs.executing_macro = method;
         }
+        FrontRecordOrigin(fs, method, std::span<const u32>{&argument, 1}, origin);
         fs.parameters.push_back(argument);
         if (is_last_call) {
             FrontRunMacro(system, split, fs);
@@ -1499,12 +1591,13 @@ void Maxwell3D::FrontCallMethod(Core::System& system, VideoCommon::GpuSplit& spl
 
 void Maxwell3D::FrontCallMultiMethod(Core::System& system, VideoCommon::GpuSplit& split,
                                      u32 method, const u32* base_start, u32 amount,
-                                     u32 methods_pending) {
+                                     u32 methods_pending, const DmaCommandOrigin* origin) {
     auto& fs = Front(system, split);
     if (method >= MacroRegistersStart) {
         if (fs.executing_macro == 0) {
             fs.executing_macro = method;
         }
+        FrontRecordOrigin(fs, method, std::span<const u32>{base_start, amount}, origin);
         fs.parameters.insert(fs.parameters.end(), base_start, base_start + amount);
         if (amount == methods_pending) {
             FrontRunMacro(system, split, fs);
@@ -1610,21 +1703,45 @@ void Maxwell3D::FrontRunMacro(Core::System& system, VideoCommon::GpuSplit& split
         VideoCommon::Nx2Profile::Scope profile_scope{VideoCommon::Nx2Profile::Zone::Macro};
         engine.native_interpreter.active_dram = &native_data_ram;
         const auto parameter_count = fs.parameters.size();
+        const auto code_generation = engine.native_code_generation;
+#ifdef ARCHITECTURE_x86_64
+        auto capture = VideoCommon::Nx2MacroFailure::Begin(
+            &engine, start, method, code_generation, engine.native_code,
+            fs.parameters, native_data_ram);
+#else
+        std::unique_ptr<VideoCommon::Nx2MacroFailure::Capture> capture;
+#endif
+        if (capture) {
+            try {
+                capture->document["parameter_origins"] = fs.parameter_origins;
+                capture->document["origin_trace_complete"] = fs.origins_complete &&
+                    fs.parameter_origins.is_array() && fs.parameter_origins.size() == parameter_count;
+                capture->document["origin_word_cap"] = DmaCommandOrigin::MaxWords;
+            } catch (...) {
+                // Diagnostic allocation failure must not change emulated execution.
+                fs.origins_complete = false;
+            }
+        }
         const auto read = [&](u32 address) {
             if (address >= Regs::NUM_REGS) {
+                if (capture) capture->Read(address, 0U);
                 return 0U;
             }
-            return fs.back_owned[address] ? FrontRegister(split, fs, address) : fs.regs[address];
+            const u32 value = fs.back_owned[address] ? FrontRegister(split, fs, address) : fs.regs[address];
+            if (capture) capture->Read(address, value);
+            return value;
         };
         const auto emit = [&](u32 address, u32 value) {
             if (address >= MacroRegistersStart) {
                 return false;
             }
+            const size_t fifo_before = capture ? fs.parameters.size() : 0;
             FrontWrite(split, fs, address, value, true, true);
             // MME_DMA_READ (into data RAM) and MME_DMA_READ_FIFOED (into the load FIFO).
             if (address == 0x157 || address == 0x158) {
                 FrontDmaRead(split, fs, method, address, value);
             }
+            if (capture) capture->Emit(address, value, fifo_before, fs.parameters, native_data_ram);
             return true;
         };
 #ifdef ARCHITECTURE_x86_64
@@ -1632,19 +1749,29 @@ void Maxwell3D::FrontRunMacro(Core::System& system, VideoCommon::GpuSplit& split
             engine.native_jit = std::make_shared<TuringMacroJit>();
         }
         engine.native_jit->Prepare(engine.native_code, engine.native_code_generation);
+        TuringMacroJit::FailureState checkpoint;
         const auto result = engine.native_jit->Execute(
-            start, fs.parameters, std::span<u32>{native_data_ram}, read, emit);
+            start, fs.parameters, std::span<u32>{native_data_ram}, read, emit,
+            capture ? &checkpoint : nullptr);
+        if (capture) capture->Finish(result, checkpoint, fs.parameters, native_data_ram);
 #else
         const auto result =
             engine.native_interpreter.Execute(engine.native_code, start, fs.parameters, read, emit);
 #endif
         if (!result.success) {
             engine.native_execution_failed = true;
+            VideoCommon::Nx2MacroFailure::NotifyFailure(&engine, start, code_generation);
+#ifdef ARCHITECTURE_x86_64
+            if (TuringMacroJit::TrackFailurePc())
+                LOG_ERROR(HW_GPU, "Native MME failure location: start={:#x}, pc={:#x}", start, result.pc);
+#endif
             LOG_ERROR(HW_GPU, "Native MME (split front) failed: start={:#x}, consumed={}/{}, error={}",
                       start, result.consumed, parameter_count, result.error);
         }
     }
     fs.parameters.clear();
+    fs.parameter_origins = nullptr;
+    fs.origins_complete = true;
     if (fs.draw_pending) {
         fs.draw_pending = false;
         split.Defer([this, system_ptr = &system] { FinishFrontMacro(*system_ptr); },

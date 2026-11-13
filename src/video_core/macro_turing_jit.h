@@ -5,6 +5,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <memory>
 #include <span>
 #include <string_view>
@@ -55,6 +56,21 @@ public:
         const std::vector<Word>* fifo;
     };
 
+    // Diagnostic only: no continuation or replay uses this state.
+    struct FailureState {
+        std::array<Word, 24> regs;
+        Word carry, method, increment, loop_count, loop_start, loop_end, next_pc, steps;
+        bool end_next, stopped, cancel_end;
+    };
+
+    static bool TrackFailurePc() {
+        static const bool enabled = [] {
+            const char* path = std::getenv("EDEN_NX2_MME_FAILURE_DUMP");
+            return path && *path;
+        }();
+        return enabled;
+    }
+
     enum Error : Word {
         None = 0,
         FifoUnderflow,
@@ -95,13 +111,13 @@ public:
         if (program && generation == compiled_generation) {
             return;
         }
-        program = std::make_unique<Program>(code);
+        program = std::make_unique<Program>(code, TrackFailurePc());
         compiled_generation = generation;
     }
 
     template <typename Read, typename Emit>
     Result Execute(Word start, std::vector<Word>& parameters, std::span<Word> data_ram, Read read,
-                   Emit emit) {
+                   Emit emit, FailureState* failure_state = nullptr) {
         State state;
         state.regs.fill(0);
         state.carry = state.method = state.increment = 0;
@@ -110,6 +126,7 @@ public:
         state.fail_pc = 0;
         state.end_next = state.stopped = state.cancel_end = 0;
         state.start = start;
+        state.next_pc = start;
         state.steps = 1000000;
         state.params = parameters.data();
         state.params_size = static_cast<Word>(parameters.size());
@@ -122,6 +139,12 @@ public:
         const Word error = program->entry(&state);
         if (error == None) {
             return {true, state.fail_pc, state.consumed, {}};
+        }
+        if (failure_state) {
+            *failure_state = {state.regs, state.carry, state.method, state.increment,
+                              state.loop_count, state.loop_start, state.loop_end,
+                              state.next_pc, state.steps, state.end_next != 0,
+                              state.stopped != 0, state.cancel_end != 0};
         }
         return {false, state.fail_pc, state.consumed, ErrorText(error)};
     }
@@ -144,8 +167,8 @@ private:
     };
 
     struct Program : Xbyak::CodeGenerator {
-        explicit Program(std::span<const Word> code)
-            : Xbyak::CodeGenerator(1 << 20, Xbyak::AutoGrow) {
+        explicit Program(std::span<const Word> code, bool track_pc_)
+            : Xbyak::CodeGenerator(1 << 20, Xbyak::AutoGrow), track_pc{track_pc_} {
             Generate(code);
             ready();
             entry = getCode<Word (*)(State*)>();
@@ -155,6 +178,7 @@ private:
 
     private:
         using Decoded = TuringMacroInterpreter::Decoded;
+        const bool track_pc;
 #ifdef _WIN32
         const Xbyak::Reg64 arg0 = rcx, arg1 = rdx, arg2 = r8;
 #else
@@ -180,6 +204,7 @@ private:
             sub(rsp, 40);
             mov(st, arg0);
             mov(eax, dword[st + offsetof(State, start)]);
+            if (track_pc) mov(dword[st + offsetof(State, fail_pc)], eax);
             cmp(eax, count);
             jae(fail_outside, T_NEAR);
             lea(rcx, ptr[rip + table]);
@@ -193,6 +218,7 @@ private:
             // Dispatch on eax (the next pc). Every backward edge comes through here, so the
             // instruction limit is counted here.
             L(dispatch);
+            if (track_pc) mov(dword[st + offsetof(State, fail_pc)], eax);
             sub(dword[st + offsetof(State, steps)], 1);
             jz(fail_steps, T_NEAR);
             cmp(eax, count);
@@ -299,6 +325,7 @@ private:
         }
 
         void Instruction(Word pc, Word count, const Decoded& d) {
+            if (track_pc) mov(dword[st + offsetof(State, fail_pc)], pc);
             // FIFO loads, in lane order.
             for (Word i = 0; i < 2; ++i) {
                 const Xbyak::Reg32 load = i == 0 ? r12d : r13d;
@@ -444,6 +471,7 @@ private:
             } else if (pc + 1 < count) {
                 jmp(labels[pc + 1], T_NEAR);
             } else {
+                if (track_pc) mov(dword[st + offsetof(State, fail_pc)], pc + 1);
                 jmp(fail_outside, T_NEAR);
             }
         }

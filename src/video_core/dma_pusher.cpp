@@ -10,6 +10,7 @@
 #include <cstdlib>
 #include <cstdio>
 #include <span>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -186,6 +187,7 @@ bool DmaPusher::Step() {
 
     if (prefetch_size > 0) {
         const std::span<const CommandHeader> commands{command_list.prefetch_command_list};
+        BeginOriginParse(nullptr, commands, command_list, "prefetch-unknown-address");
         command_resume_offset +=
             ProcessCommands(commands.subspan(command_resume_offset), command_resume_offset);
         if (puller.HasPendingAcquire()) {
@@ -321,6 +323,7 @@ bool DmaPusher::Step() {
                 header.size};
             RecordParsedEntry(header, commands);
             Nx2CmdPageDiag::CountEntry(Nx2CmdPageDiag::Path::Submitted);
+            BeginOriginParse(&header, commands, command_list, "submitted-current-snapshot", gpu_written);
             command_resume_offset += ProcessCommands(commands, 0);
         } else if (use_safe) {
             Tegra::Memory::GpuGuestMemory<Tegra::CommandHeader, Tegra::Memory::GuestMemoryFlags::SafeRead>headers(memory_manager, dma_state.dma_get, header.size, &command_headers);
@@ -330,6 +333,7 @@ bool DmaPusher::Step() {
                 CheckLiveRead(live_read_reason, header, commands, submitted_copy);
             }
             Nx2CmdPageDiag::CountEntry(Nx2CmdPageDiag::Path::Safe);
+            BeginOriginParse(&header, commands, command_list, "safe-guest-memory", gpu_written);
             command_resume_offset +=
                 ProcessCommands(commands.subspan(command_resume_offset), command_resume_offset);
         } else if (bool pending = false;
@@ -346,6 +350,7 @@ bool DmaPusher::Step() {
                 CheckLiveRead(live_read_reason, header, commands, submitted_copy);
             }
             Nx2CmdPageDiag::CountEntry(Nx2CmdPageDiag::Path::Copy);
+            BeginOriginParse(&header, commands, command_list, "gpu-list-copy-or-synced-memory", gpu_written);
             command_resume_offset +=
                 ProcessCommands(commands.subspan(command_resume_offset), command_resume_offset);
         } else {
@@ -357,6 +362,7 @@ bool DmaPusher::Step() {
                 CheckLiveRead(live_read_reason, header, commands, submitted_copy);
             }
             Nx2CmdPageDiag::CountEntry(Nx2CmdPageDiag::Path::Slow);
+            BeginOriginParse(&header, commands, command_list, "slow-guest-memory", gpu_written);
             command_resume_offset +=
                 ProcessCommands(commands.subspan(command_resume_offset), command_resume_offset);
         }
@@ -456,25 +462,28 @@ size_t DmaPusher::ProcessCommands(std::span<const CommandHeader> commands, size_
             // No command active - this is the first word of a new one
             switch (command_header.mode) {
             case SubmissionMode::Increasing:
-                SetState(command_header);
+                SetState(command_header, word_offset + index);
                 dma_state.non_incrementing = false;
                 dma_increment_once = false;
                 break;
             case SubmissionMode::NonIncreasing:
-                SetState(command_header);
+                SetState(command_header, word_offset + index);
                 dma_state.non_incrementing = true;
                 dma_increment_once = false;
                 break;
             case SubmissionMode::Inline:
+                NoteMethodHeader(command_header, word_offset + index);
+                origin_inline_argument = true;
                 dma_state.method = command_header.method;
                 dma_state.subchannel = command_header.subchannel;
                 dma_state.dma_word_offset = u64(-s64(dma_state.dma_get)); // negate to set address as 0
                 CallMethod(command_header.arg_count);
+                origin_inline_argument = false;
                 dma_state.non_incrementing = true;
                 dma_increment_once = false;
                 break;
             case SubmissionMode::IncreaseOnce:
-                SetState(command_header);
+                SetState(command_header, word_offset + index);
                 dma_state.non_incrementing = false;
                 dma_increment_once = true;
                 break;
@@ -521,7 +530,9 @@ void DmaPusher::ResolveSplitMethod(GPUVAddr entry_address) {
             .non_incrementing = dma_state.non_incrementing,
             .increment_once = dma_increment_once,
             .resume_address = split_method_end,
+            .header_origin = origin_header,
         });
+        origin_header = {};
         dma_state.method_count = 0;
         dma_increment_once = false;
     }
@@ -531,10 +542,69 @@ void DmaPusher::ResolveSplitMethod(GPUVAddr entry_address) {
         dma_state.method_count = resume->method_count;
         dma_state.non_incrementing = resume->non_incrementing;
         dma_increment_once = resume->increment_once;
+        origin_header = resume->header_origin;
     }
 }
 
-void DmaPusher::SetState(const CommandHeader& command_header) {
+void DmaPusher::BeginOriginParse(const CommandListHeader* header,
+                               std::span<const CommandHeader> words, const CommandList& list,
+                               const char* path, bool gpu_written) {
+    static const bool enabled = [] {
+        const auto* value = std::getenv("EDEN_NX2_MME_FAILURE_DUMP");
+        return value && *value;
+    }();
+    if (!enabled) return;
+    origin_parse = {};
+    origin_parse.entry_known = header != nullptr;
+    if (header) {
+        origin_parse.entry_raw = header->raw;
+        origin_parse.entry_address = header->addr;
+        origin_parse.entry_words = header->size;
+    }
+    origin_parse.entry_index = dma_pushbuffer_subindex;
+    origin_parse.channel = channel_state.bind_id;
+    origin_parse.read_path = path;
+    origin_parse.gpu_written = gpu_written;
+    origin_parse.resume_offset = command_resume_offset;
+    origin_parse.snapshot_suspensions = list.snapshot_suspensions;
+    origin_parse.current_suspensions = suspensions.load(std::memory_order_acquire);
+    origin_parse.parse_id = ++origin_parse_id;
+    origin_parse.words = words;
+    if (std::string_view{path} == "gpu-list-copy-or-synced-memory")
+        origin_parse.read_ranges = std::span{origin_read_ranges}.first(origin_read_range_count);
+    const auto index = dma_pushbuffer_subindex;
+    origin_parse.snapshot_deferred = std::ranges::binary_search(list.deferred_entries, static_cast<u32>(index));
+    if (header && !origin_parse.snapshot_deferred && index < list.submitted_offsets.size()) {
+        const size_t offset = list.submitted_offsets[index];
+        const size_t count = header->size;
+        if (offset <= list.submitted_words.size() && count <= list.submitted_words.size() - offset)
+            origin_parse.snapshot = std::span<const CommandHeader>{list.submitted_words}.subspan(offset, count);
+    }
+}
+
+void DmaPusher::NoteMethodHeader(const CommandHeader& command_header, size_t word_offset) {
+    if (origin_parse.parse_id == 0) return;
+    origin_header = {.known = true,
+                     .address_known = origin_parse.entry_known,
+                     .address = origin_parse.entry_known ? origin_parse.entry_address + word_offset * 4 : 0,
+                     .word = command_header.argument,
+                     .word_offset = word_offset,
+                     .parse_id = origin_parse.parse_id,
+                     .read_path = origin_parse.read_path,
+                     .entry_raw = origin_parse.entry_raw,
+                     .entry_address = origin_parse.entry_address,
+                     .entry_index = origin_parse.entry_index,
+                     .entry_words = origin_parse.entry_words};
+    if (!origin_parse.read_ranges.empty()) origin_header.read_path = "unknown-read-range-cap";
+    for (const auto& range : origin_parse.read_ranges)
+        if (word_offset >= range.begin && word_offset < range.end) {
+            origin_header.read_path = range.path;
+            break;
+        }
+}
+
+void DmaPusher::SetState(const CommandHeader& command_header, size_t word_offset) {
+    NoteMethodHeader(command_header, word_offset);
     dma_state.method = command_header.method;
     dma_state.subchannel = command_header.subchannel;
     dma_state.method_count = command_header.method_count;
@@ -589,8 +659,14 @@ void DmaPusher::CallMethod(u32 argument) {
                 if (type == Engines::EngineTypes::Maxwell3D) {
                     auto* const maxwell3d = static_cast<Engines::Maxwell3D*>(subchannel);
                     if (maxwell3d->GetNativeMacroEngine().native_turing) {
+                        std::optional<DmaCommandOrigin> origin;
+                        if (maxwell3d->WantsMacroOrigin(dma_state.method))
+                            origin = BuildDmaCommandOrigin(origin_parse, origin_header,
+                                origin_inline_argument ? origin_header.word_offset : dma_state.dma_word_offset / 4,
+                                1, dma_state.method, dma_state.subchannel, dma_state.method_count,
+                                origin_inline_argument);
                         maxwell3d->FrontCallMethod(system, split, dma_state.method, argument,
-                                                   dma_state.is_last_call);
+                                                   dma_state.is_last_call, origin ? &*origin : nullptr);
                         return;
                     }
                 } else if (type == Engines::EngineTypes::KeplerCompute) {
@@ -650,8 +726,14 @@ void DmaPusher::CallMultiMethod(const u32* base_start, u32 num_methods) {
                 if (type == Engines::EngineTypes::Maxwell3D) {
                     auto* const maxwell3d = static_cast<Engines::Maxwell3D*>(subchannel);
                     if (maxwell3d->GetNativeMacroEngine().native_turing) {
+                        std::optional<DmaCommandOrigin> origin;
+                        if (maxwell3d->WantsMacroOrigin(dma_state.method))
+                            origin = BuildDmaCommandOrigin(origin_parse, origin_header,
+                                dma_state.dma_word_offset / 4, num_methods, dma_state.method,
+                                dma_state.subchannel, dma_state.method_count, false);
                         maxwell3d->FrontCallMultiMethod(system, split, dma_state.method, base_start,
-                                                        num_methods, dma_state.method_count);
+                                                        num_methods, dma_state.method_count,
+                                                        origin ? &*origin : nullptr);
                         return;
                     }
                 } else if (type == Engines::EngineTypes::KeplerCompute) {
@@ -752,6 +834,14 @@ bool DmaPusher::IsGpuWrittenCommands(GPUVAddr address, size_t size) {
 }
 
 bool DmaPusher::ReadGpuWrittenCommands(GPUVAddr address, u32 count, bool* pending) {
+    origin_read_range_count = 0;
+    // Diagnostic A/B: take Step's existing full-flush path before its guest-memory read.
+    // Exact opt-in only; no pending tick or command-list read is started on this path.
+    static const bool force_flush = [] {
+        const char* value = std::getenv("EDEN_NX2_LIST_FORCE_FLUSH");
+        return value && std::string_view{value} == "1";
+    }();
+    if (force_flush) return false;
     // The pages are marked as command list pages: from the next write on, the buffer cache copies
     // them to host memory right after the dispatch or copy that writes them and submits. The
     // front then waits only for the back to run that work and for the GPU to finish the copy, not
@@ -845,6 +935,15 @@ bool DmaPusher::ReadGpuWrittenCommands(GPUVAddr address, u32 count, bool* pendin
         if (where == GpuWrittenList::Synced) {
             memory_manager.ReadBlockUnsafe(chunk, part.data(), part.size());
         }
+        static const bool origin_enabled = [] {
+            const char* value = std::getenv("EDEN_NX2_MME_FAILURE_DUMP");
+            return value && *value;
+        }();
+        if (origin_enabled && origin_read_range_count < origin_read_ranges.size())
+            origin_read_ranges[origin_read_range_count++] = {
+                static_cast<size_t>((chunk - address) / 4),
+                static_cast<size_t>((chunk_end - address) / 4),
+                where == GpuWrittenList::Copied ? "copied-command-list-page" : "synced-guest-memory"};
         chunk = chunk_end;
     }
     return true;

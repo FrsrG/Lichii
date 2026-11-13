@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <condition_variable>
@@ -101,6 +102,128 @@ union CommandHeader {
 };
 static_assert(std::is_standard_layout_v<CommandHeader>, "CommandHeader is not standard layout");
 static_assert(sizeof(CommandHeader) == sizeof(u32), "CommandHeader has incorrect size!");
+
+// Diagnostic context: spans borrow the already-read entry and its current mutable snapshot.
+struct DmaMethodHeaderOrigin {
+    bool known{};
+    bool address_known{};
+    GPUVAddr address{};
+    u32 word{};
+    size_t word_offset{};
+    u64 parse_id{};
+    const char* read_path{"unknown"};
+    u64 entry_raw{};
+    GPUVAddr entry_address{};
+    size_t entry_index{};
+    size_t entry_words{};
+};
+
+struct DmaReadOriginRange {
+    size_t begin{};
+    size_t end{};
+    const char* path{"unknown"};
+};
+
+struct DmaParsedOrigin {
+    bool entry_known{};
+    u64 entry_raw{};
+    GPUVAddr entry_address{};
+    size_t entry_words{};
+    size_t entry_index{};
+    u32 channel{};
+    const char* read_path{"unknown"};
+    bool gpu_written{};
+    size_t resume_offset{};
+    u64 snapshot_suspensions{};
+    u64 current_suspensions{};
+    bool snapshot_deferred{};
+    u64 parse_id{};
+    std::span<const CommandHeader> words;
+    std::span<const CommandHeader> snapshot;
+    std::span<const DmaReadOriginRange> read_ranges;
+};
+
+struct DmaCommandOrigin {
+    static constexpr size_t MaxWords = 64;
+    static constexpr size_t NeighborWords = 8;
+    DmaParsedOrigin entry;
+    DmaMethodHeaderOrigin header;
+    size_t word_offset{};
+    u32 method{};
+    u32 subchannel{};
+    u32 methods_remaining{};
+    size_t segment_words{};
+    bool inline_argument{};
+    bool source_address_known{};
+    GPUVAddr source_address{};
+    size_t copied_words{};
+    std::array<u32, MaxWords> raw_words{};
+    std::array<u32, MaxWords> snapshot_words{};
+    std::array<bool, MaxWords> raw_known{};
+    std::array<bool, MaxWords> snapshot_known{};
+    std::array<const char*, MaxWords> read_paths{};
+    size_t neighbor_begin{};
+    size_t neighbor_count{};
+    std::array<u32, NeighborWords> neighbors{};
+    size_t header_neighbor_begin{};
+    size_t header_neighbor_count{};
+    std::array<u32, NeighborWords> header_neighbors{};
+};
+
+inline DmaCommandOrigin BuildDmaCommandOrigin(const DmaParsedOrigin& entry,
+                                            const DmaMethodHeaderOrigin& header,
+                                            size_t word_offset, size_t count, u32 method,
+                                            u32 subchannel, u32 remaining, bool inline_argument) {
+    DmaCommandOrigin result;
+    result.entry = entry;
+    result.header = header;
+    result.word_offset = word_offset;
+    result.method = method;
+    result.subchannel = subchannel;
+    result.methods_remaining = remaining;
+    result.segment_words = count;
+    result.inline_argument = inline_argument;
+    result.source_address_known = entry.entry_known && word_offset < entry.words.size();
+    if (result.source_address_known) result.source_address = entry.entry_address + word_offset * 4;
+    result.copied_words = (std::min)(count, DmaCommandOrigin::MaxWords);
+    for (size_t i = 0; i < result.copied_words; ++i) {
+        const size_t offset = word_offset + (inline_argument ? 0 : i);
+        result.read_paths[i] = entry.read_path;
+        if (!entry.read_ranges.empty()) {
+            result.read_paths[i] = "unknown-read-range-cap";
+            for (const auto& range : entry.read_ranges)
+                if (offset >= range.begin && offset < range.end) {
+                    result.read_paths[i] = range.path;
+                    break;
+                }
+        }
+        if (offset < entry.words.size()) {
+            result.raw_words[i] = entry.words[offset].argument;
+            result.raw_known[i] = true;
+        }
+        if (offset < entry.snapshot.size()) {
+            result.snapshot_words[i] = entry.snapshot[offset].argument;
+            result.snapshot_known[i] = true;
+        }
+    }
+    const auto neighbors = [&](size_t at, size_t& begin, size_t& size, auto& words) {
+        if (at >= entry.words.size()) return;
+        begin = at > 3 ? at - 3 : 0;
+        size = (std::min)(DmaCommandOrigin::NeighborWords, entry.words.size() - begin);
+        for (size_t i = 0; i < size; ++i) words[i] = entry.words[begin + i].argument;
+    };
+    neighbors(word_offset, result.neighbor_begin, result.neighbor_count, result.neighbors);
+    // A header retained across an entry/resume has no borrowed old span: its raw word remains
+    // known, but never label a later ring reuse as the window that originally supplied it.
+    if (header.known && header.parse_id == entry.parse_id) {
+        neighbors(header.word_offset, result.header_neighbor_begin,
+                  result.header_neighbor_count, result.header_neighbors);
+    }
+    result.entry.words = {};
+    result.entry.snapshot = {};
+    result.entry.read_ranges = {};
+    return result;
+}
 
 inline CommandHeader BuildCommandHeader(BufferMethods method, u32 arg_count, SubmissionMode mode) {
     CommandHeader result{};
@@ -200,7 +323,10 @@ private:
     size_t ProcessCommands(std::span<const CommandHeader> commands, size_t word_offset = 0);
     size_t command_resume_offset{}; ///< Words of the current entry done before a suspension
 
-    void SetState(const CommandHeader& command_header);
+    void SetState(const CommandHeader& command_header, size_t word_offset = 0);
+    void NoteMethodHeader(const CommandHeader& command_header, size_t word_offset);
+    void BeginOriginParse(const CommandListHeader* header, std::span<const CommandHeader> words,
+                          const CommandList& list, const char* path, bool gpu_written = false);
 
     void CallMethod(u32 argument);
     void CallMultiMethod(const u32* base_start, u32 num_methods);
@@ -265,6 +391,12 @@ public:
     Control::ChannelState& channel_state;
 
     DmaState dma_state{};
+    DmaParsedOrigin origin_parse;
+    DmaMethodHeaderOrigin origin_header;
+    u64 origin_parse_id{};
+    bool origin_inline_argument{};
+    std::array<DmaReadOriginRange, 64> origin_read_ranges{};
+    size_t origin_read_range_count{};
 
     // Switch 2: methods whose data continues in a later GPFIFO entry, set aside while other
     // command buffers run (NVN interleaves several, so more than one can be pending).
@@ -275,6 +407,7 @@ public:
         bool non_incrementing;
         bool increment_once;
         GPUVAddr resume_address; ///< Where the entry that continues the method starts
+        DmaMethodHeaderOrigin header_origin;
     };
     void ResolveSplitMethod(GPUVAddr entry_address);
     static constexpr size_t MaxParkedMethods = 16;
