@@ -692,7 +692,27 @@ reports alone do not prove that their records were absent from the starting
 cache. Low commit headroom and GPU-fence waits are additional unresolved
 contributors. No periodic screenshots were taken in either measurement. The
 next step distinguishes remaining first-use variants from missed cache reuse;
-an unchanged third repeat is not yet justified. Course five remains blocked.
+an unchanged third repeat was not yet justified at that point.
+
+The subsequent bounded audit validated the exact startup cache prefix, record
+checksums, runtime keys and native instruction fingerprints. All 21 compute
+programs and three graphics records were absent at run 35 startup and persisted
+successfully afterward. Seventeen compute programs had no prior matching
+instruction sequence/length; four nearest matches differed in real operands,
+not observed process-address patches. No shader-key normalization or cache
+loading fix was supported. Run 36's actual startup prefix contained all 24
+records: compute selected unconditionally, graphics in the latest-used boot
+set, with no damaged/skipped records. This justified one known-key-covered
+qualification rather than further blind warming.
+
+Run 36 completed Crystalline Fissure and reached the verified celebration,
+with zero MME-limit errors/device losses and clean shutdown. All 24 continuous
+intervals exceeded 30 FPS (minimum 41.19); periodic screenshots remained off.
+The existing full-resolution/100% settings and fixed five-CPU roster were
+unchanged. A 1.98-second transient remains. Crystalline is a **conditional
+covered-cache pass**, not a source/cache correctness fix, smoothness guarantee
+or coverage of every random effect/roster. Earlier performance failures remain
+failures. Course five may now proceed.
 
 | Check | Result |
 | --- | --- |
@@ -706,7 +726,7 @@ an unchanged third repeat is not yet justified. Course five remains blocked.
 | Pre-macro raw buffer comparison | Live stable-mapping CPU/selected/GPU agreement; earlier producer remains unknown |
 | Waveflow Waters, two laps | Conditional warmed pass in run 28; first-use run 27 below 30 FPS |
 | Airtopia Ruins, two laps | Conditional fixed-roster pass in run 33 with continuous counters/no periodic readbacks |
-| Crystalline Fissure, two laps | Runs 34/35 finished crash-free; first-use and warmed performance failed |
+| Crystalline Fissure, two laps | Conditional covered-key pass in run 36; runs 34/35 remain performance failures |
 | Remaining four courses in menu order | Pending |
 
 Only source changes, tests, and summarized verification belong in this
