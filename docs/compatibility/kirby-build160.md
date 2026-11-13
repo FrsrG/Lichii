@@ -5,6 +5,30 @@ This branch starts at Lichii `build-160`, commit
 
 The requested gameplay scope is Air Ride courses only, in menu order.
 
+## Active HUD and post-race screen investigation
+
+The subsequent user goal requires fixing the HUD disappearing during Floria
+Fields and the black screen after its finish while audio continues. These
+are now required defects; the earlier menu-restart workaround does not satisfy
+this goal. The preceding eight-course crash/performance results remain valid
+only within their stated scope.
+
+Run 44 reproduced both failures on the delivered executable and settings:
+the HUD was visible at race time 0:03.15, later disappeared while the 3D race
+continued, and advancing past the finish celebration produced a black screen.
+The process kept presenting rather than hanging, and closed normally. Local
+RenderDoc captures cover an affected racing frame and the black post-race
+frame. No raw captures or game-derived resources are published.
+
+Source inspection identifies two discriminators, not a confirmed cause:
+native draw continuations carry vertex/index counts and instance counts,
+and zero-instance draws are discarded before Vulkan recording. The current
+snapshot workaround can substitute pre-producer continuation values. A
+supported back-thread macro mode retains the native JIT while changing the
+front/back command path, so it can test this hypothesis. Upstream alias and
+feedback fixes are also being compared against the actual captured output.
+No rendering fix is claimed at this stage.
+
 ## Current delivered result
 
 All eight courses completed without a crash at the current sustained 30 FPS
