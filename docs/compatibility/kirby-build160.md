@@ -56,6 +56,33 @@ tooling only. The subsequent full-draw-resolution control still loses the HUD
 with no reported pipeline/view/texture-buffer reuse mismatches. Texture memo
 resolution and GPU visibility remain separate required discriminators.
 
+Further same-executable controls reject forced index rebinding (run 52) and
+ending the render pass before the selected UI vertex shader (run 53): both
+reach their diagnostic hooks and still show missing racing HUD. Run 54 adds
+a global memory barrier and retains the HUD in early screenshots, but later
+shows severely corrupted UI geometry. Another game process started during
+that run, so its subsequent slowdown is not an isolated measurement of the
+barrier's cost. The following finish/wait control (run 55) is inconclusive:
+boot/navigation was affected by concurrent load and no race was attempted.
+These diagnostics are default-off; none is a confirmed rendering fix.
+
+CPU-only capture inspection also recovers the actual bound uniform bytes for
+an affected UI draw, including its geometry/material pointers and instance
+index. This narrows the next inspection to the exact consumed records rather
+than assuming that an entire storage binding is bad. The actual material
+contents and GPU-produced vertex positions remain separate unknowns.
+
+A focused tool review found a matching NVIDIA opaque-address replay failure
+in [RenderDoc issue 3880](https://github.com/baldurk/renderdoc/issues/3880), but
+no general documented repair for these existing captures. Repeating the
+already-failed replay options adds no evidence. CPU structured capture reads
+remain usable. If recorded buffer bytes do not explain the failure, selected
+shader [Debug Printf](https://github.com/KhronosGroup/Vulkan-ValidationLayers/blob/main/docs/debug_printf.md)
+can provide GPU values without replay, with timing effects explicitly tracked.
+REA and its reconstruction companion do not add a GPU debugger to this
+source-available investigation; the installed Windows session's supported
+tools and missing providers were checked without changing configuration.
+
 ## Current delivered result
 
 All eight courses completed without a crash at the current sustained 30 FPS
