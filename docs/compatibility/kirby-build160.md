@@ -482,10 +482,25 @@ the asynchronous dump callback before rethrow. No shader-error-reporting mode
 or normal gameplay behavior is added.
 
 The changed device, tracker and semaphore objects compile against SDK 2026.3.
-Full diagnostic build, runtime initialization, shader-debug output and crash
-dump collection remain unverified. One reproduction is conditional on verifying
-initialization/output first; this is crash diagnosis and cannot qualify a fix.
+The full SDK-enabled GUI build on `515614e` also passed, including matching
+EXE/PDB, complete dependencies and the normal 1 MiB stack.
 [NVIDIA documents the collection requirements](https://docs.nvidia.com/nsight-aftermath/SDK/index.html).
+
+Run 22 verified successful tracker initialization and checkpoint availability.
+It retained 4,973 SPIR-V files but produced no `.nvdbg` sidecars or GPU crash
+dump. Driver 621.14 supports the documented R615+ embedded-debug mechanism;
+missing sidecars alone therefore do not disprove eventual dump correlation.
+That correlation has not been tested.
+
+The startup helper timed out at 120 seconds without sending input. A later
+status at uptime 210.17 seconds still reported zero presents while the process
+was consuming CPU during preload. The attempt was bounded at 240 seconds;
+an owned thread snapshot was preserved, then closing was requested. The
+owned process did not exit and was force-stopped. This is incomplete diagnostic
+setup, not a gameplay crash or qualification. The portable global profile was
+restored byte-for-byte (SHA-256 beginning `f3084cc6`); the title profile remained
+unchanged. Startup stacks must justify any correction before another attempt;
+no cache sweep or arbitrary longer wait is justified by missing sidecars.
 
 ## Acceptance record
 
