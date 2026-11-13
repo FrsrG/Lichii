@@ -37,12 +37,28 @@ Later logs show invalid placeholder device addresses beginning at
 at macro start `0x1d2`. These are separate unresolved observations; the
 stack-reserve experiment does not establish full compatibility.
 
+## Cold-hint address bounds
+
+Ported cerroverb's focused [PR 1568](https://github.com/zortos293/Lichii/pull/1568)
+from commits `05beffd91e1a33677b24bf827a3220254d65536c` and
+`d6cbce6a2ec6ede7c52e7e925a2532f3905f2806`. The runtime logged 513
+out-of-range page accesses beginning at the same placeholder address cited
+by that investigation. `HintCold` now rejects addresses outside its device
+address space and clamps ranges before computing their final page.
+
+A local differential probe compiled the actual method body with an
+instrumented page-table substitute: the fixed method passes nine boundary
+cases; the original passes three and fails six. This verifies page lookup
+bounds, not host page-discard behavior. Full build and gameplay verification
+of this port are pending.
+
 ## Acceptance record
 
 | Check | Result |
 | --- | --- |
 | Unmodified build-160 startup | Stack overflow reproduced |
 | Source traversal regression tests | Pending |
+| Cold-hint method boundary probe | Fixed 9/9; baseline 3/9 |
 | Patched normal-stack startup | Pending |
 | Diagnostic Floria Fields race, result, menu | Completed; macro/render errors remain |
 | Patched Floria Fields race, result, menu | Pending |
