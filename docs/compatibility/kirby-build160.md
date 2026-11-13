@@ -236,6 +236,31 @@ the diagnostic. Original installation/profile files remain untouched.
 Each course must first finish without a crash, then any performance below
 60 FPS is investigated before advancing to the next course.
 
+## Opt-in invalid depth-sample workaround
+
+GPU-assisted validation in run 10 reported
+`VUID-vkCmdDrawIndexed-None-06479`: fragment shader descriptor
+`fs_tex5_00x1024`, set 0/binding 42/array element 0, performed
+`OpImageSampleDrefImplicitLod` on a nonnull A8B8G8R8_UNORM color view.
+The name means constant buffer 5, byte offset 0, array count 1024. The
+validation layer later failed waiting for a fence and crashed; this does not
+establish that the descriptor mismatch caused the original device loss.
+
+`EDEN_NX2_NULL_INVALID_DEPTH=1` is a default-off diagnostic workaround. On a
+device supporting null descriptors, the descriptor upload substitutes a null
+image handle only for a nonnull, non-depth image view referenced by a depth
+comparison descriptor. It preserves the sampler, descriptor layout, valid
+depth/depth-stencil samples, ordinary color samples, and unsupported devices.
+The first 16 substitutions log image/view IDs, guest GPU address, format,
+constant-buffer index/offset and array index, without additional guest reads.
+
+This deliberately removes invalid samples and may omit intended visual content;
+it is not a proven guest-semantic correction. It does not allocate a fallback
+depth texture, implement software comparison, change Vulkan features, or raise
+the MME execution budget. Both affected production translation units pass
+syntax checks. No existing descriptor-queue fixture covers this path; the
+targeted full-race runtime comparison is the required behavioral validation.
+
 ## Acceptance record
 
 | Check | Result |

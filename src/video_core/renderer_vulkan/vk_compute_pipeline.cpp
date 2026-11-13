@@ -646,12 +646,12 @@ bool ComputePipeline::Configure(Tegra::Engines::KeplerCompute& kepler_compute,
     const VideoCommon::SamplerId* samplers_it{samplers.data()};
     const VideoCommon::ImageViewInOut* views_it{views.data()};
     if (!shadow) {
-        PushImageDescriptors(texture_cache, guest_descriptor_queue, info, rescaling, samplers_it,
+        PushImageDescriptors(device, texture_cache, guest_descriptor_queue, info, rescaling, samplers_it,
                              views_it);
     } else {
         auto sampled_info{info};
         sampled_info.image_descriptors.clear();
-        PushImageDescriptors(texture_cache, guest_descriptor_queue, sampled_info, rescaling,
+        PushImageDescriptors(device, texture_cache, guest_descriptor_queue, sampled_info, rescaling,
                              samplers_it, views_it);
         for (const auto& desc : info.image_descriptors) {
             bool is_rescaled{};

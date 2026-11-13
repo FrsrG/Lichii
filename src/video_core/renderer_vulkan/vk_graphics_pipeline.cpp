@@ -1085,7 +1085,7 @@ bool GraphicsPipeline::ConfigureImpl(bool is_indexed) {
         {
             Profile::Scope scope{Profile::Zone::PushDescriptors};
             const size_t first_entry = guest_descriptor_queue.UpdateCount();
-            PushImageDescriptors(texture_cache, guest_descriptor_queue, stage_infos[stage],
+            PushImageDescriptors(device, texture_cache, guest_descriptor_queue, stage_infos[stage],
                                  rescaling, samplers_it, views_it);
             if (captured_delta) {
                 KeepImageDescriptors(stage, first_entry);
@@ -1229,7 +1229,7 @@ bool GraphicsPipeline::ConfigureDelta(bool is_indexed) {
         } else {
             Profile::Scope scope{Profile::Zone::PushDescriptors};
             const size_t first_entry = guest_descriptor_queue.UpdateCount();
-            PushImageDescriptors(texture_cache, guest_descriptor_queue, stage_infos[stage],
+            PushImageDescriptors(device, texture_cache, guest_descriptor_queue, stage_infos[stage],
                                  rescaling, samplers_it, views_it);
             KeepImageDescriptors(stage, first_entry);
         }

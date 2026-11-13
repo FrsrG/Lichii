@@ -7,7 +7,10 @@
 #pragma once
 
 #include <cstddef>
+#include <atomic>
+#include <cstdlib>
 #include <optional>
+#include <string_view>
 
 #include <boost/container/small_vector.hpp>
 
@@ -392,7 +395,7 @@ public:
     std::array<f32, 4> words{};
 };
 
-inline void PushImageDescriptors(TextureCache& texture_cache,
+inline void PushImageDescriptors(const Device& device, TextureCache& texture_cache,
                                  GuestDescriptorQueue& guest_descriptor_queue,
                                  const Shader::Info& info, RescalingPushConstant& rescaling,
                                  const VideoCommon::SamplerId*& samplers,
@@ -411,6 +414,31 @@ inline void PushImageDescriptors(TextureCache& texture_cache,
             if (vk_image_view == VK_NULL_HANDLE) {
                 const VkImageView null_image_view{texture_cache.GetImageView(VideoCommon::NULL_IMAGE_VIEW_ID).Handle(desc.type)};
                 if (null_image_view != VK_NULL_HANDLE) vk_image_view = null_image_view;
+            }
+            // Diagnostic workaround for an observed color view sampled with Dref. This
+            // substitutes a null sample; it does not establish correct guest semantics.
+            static const bool null_invalid_depth = [] {
+                const char* value = std::getenv("EDEN_NX2_NULL_INVALID_DEPTH");
+                return value && std::string_view{value} == "1";
+            }();
+            if (null_invalid_depth && desc.is_depth && vk_image_view != VK_NULL_HANDLE &&
+                device.HasNullDescriptor()) {
+                const auto type = VideoCore::Surface::GetFormatType(image_view.format);
+                if (type != VideoCore::Surface::SurfaceType::Depth &&
+                    type != VideoCore::Surface::SurfaceType::DepthStencil) {
+                    vk_image_view = VK_NULL_HANDLE;
+                    static std::atomic<u32> logged{};
+                    if (logged.load(std::memory_order_relaxed) < 16 &&
+                        logged.fetch_add(1, std::memory_order_relaxed) < 16) {
+                        LOG_WARNING(Render_Vulkan,
+                                    "Null invalid depth descriptor workaround: image={} view={} "
+                                    "gpu_addr={:#x} format={} cbuf={} offset={:#x} array_index={} "
+                                    "(first 16 substitutions only)",
+                                    image_view.image_id.Value(), image_view_id.Value(),
+                                    image_view.GpuAddr(), image_view.format, desc.cbuf_index,
+                                    desc.cbuf_offset, index);
+                    }
+                }
             }
             Sampler& sampler{texture_cache.GetSampler(sampler_id)};
             guest_descriptor_queue.AddSampledImage(vk_image_view,
