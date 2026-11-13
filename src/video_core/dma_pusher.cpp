@@ -595,6 +595,22 @@ bool DmaPusher::UseDiagnosticDrawSnapshot(const CommandList& list,
     return true;
 }
 
+void DmaPusher::ResolveOriginDeviceAddresses(DmaCommandOrigin& origin) const {
+    origin.address_space_known = true;
+    origin.address_space_id = memory_manager.GetID();
+    if (!origin.source_address_known) return;
+    for (size_t i = 0; i < origin.copied_words; ++i) {
+        if (!origin.raw_known[i]) continue;
+        const GPUVAddr address = origin.source_address + (origin.inline_argument ? 0 : i * 4);
+        // Single-address translation preserves the word offset. This is DAddr, the
+        // BufferBase::CpuAddr domain used in Vulkan "Buffer 0x..." object names.
+        if (const auto device = memory_manager.GpuToCpuAddress(address)) {
+            origin.device_addresses[i] = *device;
+            origin.device_addresses_known[i] = true;
+        }
+    }
+}
+
 void DmaPusher::BeginOriginParse(const CommandListHeader* header,
                                std::span<const CommandHeader> words, const CommandList& list,
                                const char* path, bool gpu_written) {
@@ -709,11 +725,13 @@ void DmaPusher::CallMethod(u32 argument) {
                     auto* const maxwell3d = static_cast<Engines::Maxwell3D*>(subchannel);
                     if (maxwell3d->GetNativeMacroEngine().native_turing) {
                         std::optional<DmaCommandOrigin> origin;
-                        if (maxwell3d->WantsMacroOrigin(dma_state.method))
+                        if (maxwell3d->WantsMacroOrigin(dma_state.method)) {
                             origin = BuildDmaCommandOrigin(origin_parse, origin_header,
                                 origin_inline_argument ? origin_header.word_offset : dma_state.dma_word_offset / 4,
                                 1, dma_state.method, dma_state.subchannel, dma_state.method_count,
                                 origin_inline_argument);
+                            ResolveOriginDeviceAddresses(*origin);
+                        }
                         maxwell3d->FrontCallMethod(system, split, dma_state.method, argument,
                                                    dma_state.is_last_call, origin ? &*origin : nullptr);
                         return;
@@ -776,10 +794,12 @@ void DmaPusher::CallMultiMethod(const u32* base_start, u32 num_methods) {
                     auto* const maxwell3d = static_cast<Engines::Maxwell3D*>(subchannel);
                     if (maxwell3d->GetNativeMacroEngine().native_turing) {
                         std::optional<DmaCommandOrigin> origin;
-                        if (maxwell3d->WantsMacroOrigin(dma_state.method))
+                        if (maxwell3d->WantsMacroOrigin(dma_state.method)) {
                             origin = BuildDmaCommandOrigin(origin_parse, origin_header,
                                 dma_state.dma_word_offset / 4, num_methods, dma_state.method,
                                 dma_state.subchannel, dma_state.method_count, false);
+                            ResolveOriginDeviceAddresses(*origin);
+                        }
                         maxwell3d->FrontCallMultiMethod(system, split, dma_state.method, base_start,
                                                         num_methods, dma_state.method_count,
                                                         origin ? &*origin : nullptr);

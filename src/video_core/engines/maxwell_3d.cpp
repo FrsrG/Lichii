@@ -1515,7 +1515,8 @@ void Maxwell3D::FrontRecordOrigin(FrontState& fs, u32 method,
                 break;
             }
             Json row{{"parameter_index", first + i}, {"argument", arguments[i]},
-                     {"origin_known", origin != nullptr}};
+                     {"origin_known", origin != nullptr},
+                     {"source_device_address", nullptr}, {"address_space_id", nullptr}};
             if (origin && i < origin->copied_words) {
                 const auto& e = origin->entry;
                 const auto& h = origin->header;
@@ -1536,6 +1537,10 @@ void Maxwell3D::FrontRecordOrigin(FrontState& fs, u32 method,
                 row["word_offset"] = offset;
                 row["word_read_path"] = origin->read_paths[i] ? origin->read_paths[i] : "unknown";
                 row["source_gpu_address"] = origin->source_address_known ? Json(e.entry_address + offset * 4) : Json(nullptr);
+                row["source_device_address"] = origin->device_addresses_known[i] ? Json(origin->device_addresses[i]) : Json(nullptr);
+                row["address_space_id"] = origin->address_space_known ? Json(origin->address_space_id) : Json(nullptr);
+                row["device_address_domain"] = "DAddr device-memory offset; BufferBase::CpuAddr/Vulkan Buffer object-name domain";
+                row["device_address_translation"] = "current GMMU translation when this origin was copied; not a mapping epoch";
                 row["argument_source"] = origin->inline_argument ? "header-inline-bitfield" : "parameter-word";
                 row["method"] = origin->method;
                 row["subchannel"] = origin->subchannel;

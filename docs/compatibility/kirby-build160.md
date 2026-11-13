@@ -151,6 +151,15 @@ checks and 19 bounded origin checks pass; a real capture reproduced the JIT
 state and input-driven loop offline. The new real command-origin fields still
 need gameplay capture validation.
 
+Armed origins also translate each known selected argument address through the
+current GMMU into `source_device_address`, with unmapped/unknown values null.
+This is a DAddr device-memory offset in the same domain as BufferBase::CpuAddr
+and Vulkan object names `Buffer 0x...`; it is neither a host pointer, guest CPU
+virtual address, nor Vulkan buffer device address. `address_space_id` is the
+existing MemoryManager identity. Translation occurs only while copying the
+bounded armed origin, without guest reads; it is not a historical mapping epoch
+and cannot prove the mapping remained unchanged since an earlier entry read.
+
 The separate diagnostic switch `EDEN_NX2_LIST_FORCE_FLUSH=1` bypasses staged
 GPU-written-list reads and uses the existing drain/flush fallback. It changes
 timing and is reserved for an evidence-directed comparison. Both diagnostics

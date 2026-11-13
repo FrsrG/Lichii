@@ -162,6 +162,10 @@ struct DmaCommandOrigin {
     std::array<bool, MaxWords> raw_known{};
     std::array<bool, MaxWords> snapshot_known{};
     std::array<const char*, MaxWords> read_paths{};
+    bool address_space_known{};
+    size_t address_space_id{};
+    std::array<DAddr, MaxWords> device_addresses{};
+    std::array<bool, MaxWords> device_addresses_known{};
     size_t neighbor_begin{};
     size_t neighbor_count{};
     std::array<u32, NeighborWords> neighbors{};
@@ -329,6 +333,7 @@ private:
                           const CommandList& list, const char* path, bool gpu_written = false);
     bool UseDiagnosticDrawSnapshot(const CommandList& list, const CommandListHeader& header,
                                    bool gpu_written, bool use_safe);
+    void ResolveOriginDeviceAddresses(DmaCommandOrigin& origin) const;
 
     void CallMethod(u32 argument);
     void CallMultiMethod(const u32* base_start, u32 num_methods);
