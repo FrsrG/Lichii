@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <charconv>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
@@ -35,6 +36,49 @@ constexpr size_t SIZE_CAP = size_t{2} << 30;
 /// RecordingSampledTextures: a sampled capture is running.
 std::atomic<bool> recording_sampled{};
 constexpr size_t STAGING_BUDGET = size_t{256} << 20;
+
+struct BufferShaderFilter {
+    bool enabled{};
+    bool valid{true};
+    std::vector<u64> hashes;
+};
+
+const BufferShaderFilter& GetBufferShaderFilter() {
+    static const BufferShaderFilter filter = [] {
+        BufferShaderFilter result;
+        const char* value = std::getenv("EDEN_NX2_FRAME_DUMP_BUFFER_SHADER");
+        if (!value || !*value) {
+            return result;
+        }
+        result.enabled = true;
+        std::string_view remaining{value};
+        for (;;) {
+            const size_t comma = remaining.find(',');
+            std::string_view token = remaining.substr(0, comma);
+            const size_t begin = token.find_first_not_of(" \t");
+            if (begin != std::string_view::npos) {
+                token = token.substr(begin, token.find_last_not_of(" \t") - begin + 1);
+            }
+            u64 hash{};
+            const auto parsed = std::from_chars(token.data(), token.data() + token.size(), hash, 16);
+            if (token.size() != 16 || parsed.ec != std::errc{} ||
+                parsed.ptr != token.data() + token.size() || hash == 0) {
+                result.valid = false;
+                result.hashes.clear();
+                LOG_WARNING(Render_Vulkan,
+                            "Frame dump: invalid EDEN_NX2_FRAME_DUMP_BUFFER_SHADER; buffers disabled "
+                            "(expected comma-separated 16-digit nonzero shader hashes)");
+                return result;
+            }
+            result.hashes.push_back(hash);
+            if (comma == std::string_view::npos) {
+                return result;
+            }
+            remaining.remove_prefix(comma + 1);
+        }
+    }();
+    return filter;
+}
 
 template <typename T>
 T Load(const u8* pixel, int index) {
@@ -465,6 +509,13 @@ void FrameDump::NoteDispatchSampled(u64 shader_hash, std::span<const Sampled> te
 
 bool FrameDump::NoteBuffers(bool compute, std::span<const u64> shader_hashes,
                             std::span<BoundBuffer> buffers) {
+    const auto& filter = GetBufferShaderFilter();
+    if (filter.enabled &&
+        (!filter.valid || !std::ranges::any_of(shader_hashes, [&](u64 hash) {
+            return std::ranges::find(filter.hashes, hash) != filter.hashes.end();
+        }))) {
+        return false;
+    }
     bool recorded = false;
     for (BoundBuffer& buffer : buffers) {
         const size_t program = compute ? 0 : buffer.stage + 1;
@@ -878,6 +929,17 @@ void FrameDump::TickFrame() {
     const u64 frame = schedule.Frame();
     manifest << fmt::format(R"({{"kind":"frame","frame":{},"seconds":{:.3f}}})", frame, elapsed)
              << '\n';
+    if (schedule.Buffers()) {
+        const auto& filter = GetBufferShaderFilter();
+        std::string hashes;
+        for (const u64 hash : filter.hashes) {
+            hashes += fmt::format("{}\"{:016x}\"", hashes.empty() ? "" : ",", hash);
+        }
+        manifest << fmt::format(
+                        R"({{"kind":"buffer_filter","enabled":{},"valid":{},"match":"any_pipeline_stage","scope":"all_bound_stages","hashes":[{}]}})",
+                        filter.enabled, filter.valid, hashes)
+                 << '\n';
+    }
     writer = std::thread{[this] { WriterLoop(); }};
     LOG_INFO(Render_Vulkan, "Frame dump: capturing frame {} ({:.1f} s after boot){} into {}", frame,
              elapsed, schedule.Sampled() ? (schedule.Buffers() ? " with sampled textures and buffers" : " with sampled textures") : (schedule.Buffers() ? " with buffers" : ""), directory.string());
