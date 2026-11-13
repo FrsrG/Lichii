@@ -601,6 +601,16 @@ correctness and HUD/menu repair remain unproven/deferred. This is the first
 normal-stack course pass under the revised 30 FPS gate; the remaining seven
 courses still require independent qualification.
 
+Run 27 finished Waveflow Waters' default two laps without device loss or MME
+limit errors, then closed cleanly. It does **not** pass the performance gate:
+five measured ten-second windows were below 30 FPS (minimum 11.87 FPS).
+Low windows overlap substantial distinct first-use pipeline preparation; later
+windows reached roughly 54–59 FPS with little new pipeline work and no logged
+pipeline eviction. Long GPU-fence waits also occurred, so compilation alone
+is not established as the cause of every stall. One unchanged warmed repeat
+is justified before further performance diagnosis; course three remains blocked
+until course two satisfies the full gate.
+
 | Check | Result |
 | --- | --- |
 | Unmodified build-160 startup | Stack overflow reproduced |
