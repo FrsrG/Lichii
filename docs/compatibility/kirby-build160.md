@@ -5,6 +5,51 @@ This branch starts at Lichii `build-160`, commit
 
 The requested gameplay scope is Air Ride courses only, in menu order.
 
+## Current delivered result
+
+All eight courses completed without a crash at the current sustained 30 FPS
+gate, in menu order. These are **conditional passes**: the measured continuous
+ten-second intervals met 30 FPS, but individual hitches reached 2.54 seconds.
+This does not establish a literal every-frame minimum, smoothness, cold-cache
+performance, or every random roster/effect. Default laps and 100% game speed
+were retained at full resolution. The accepted executable is compiled commit
+`b2909540f832fd7676c9c433787df4b6d5d18edd`, SHA-256
+`0a11f796aa9ac643f9f2d5bafa293074af00313322966f4c961e78237859aaf2`.
+
+| Course | Laps | Accepted run | Minimum continuous interval FPS |
+| --- | --- | --- | --- |
+| Floria Fields | 3 | 26 | 53.87 |
+| Waveflow Waters | 2 | 28 | 34.42 |
+| Airtopia Ruins | 2 | 33 | 37.87 |
+| Crystalline Fissure | 2 | 36 | 41.19 |
+| Steamgust Forge | 2 | 37 | 40.18 |
+| Cavernous Corners | 2 | 39 | 52.86 |
+| Cyberion Highway | 2 | 40 | 38.29 |
+| Mount Amberfalls | 1 | 41 | 34.03 |
+
+The delivered launcher enables the snapshot, invalid-depth and list-flush
+workarounds; the local accumulated shader cache is required for comparable
+performance. Runs 33 onward use the fixed five-CPU roster documented below.
+HUD loss, dark/incorrect shading and black post-race menus remain deferred.
+Restarting the game restores readable menus. Use the validated launcher rather
+than starting the executable directly; CPU Select settings must be reapplied
+after restart for the tested roster. Earlier failed attempts remain failures.
+
+Delivery updated the original build-160 installation with exact executable,
+PDB and DXC dependencies, the title cache and three title-only draw-wait keys.
+Original files were backed up with hashes and a rollback manifest. No test
+input profile, keys or saves were copied. Both original global and title
+Controls sections remained identical after installed-profile validation.
+Run 43 verified readable main/Air Ride menus using the original Roaming
+profile, followed by normal frontend cleanup with zero device losses/MME
+limits. Run 42 was a smoke-harness error: an empty shader-dump environment
+entry caused a filesystem abort. The real CMD launcher correctly removes
+that variable; correcting the harness required no emulator source change.
+
+Source fixes and diagnostics are distinguished from these workarounds in the
+chronological evidence below. Game-derived caches/captures and backup/profile
+data remain local, outside this repository.
+
 ## Baseline reproduced
 
 The unmodified Windows executable (SHA-256
@@ -779,7 +824,7 @@ smoothness, cold-cache performance, or all-roster/effect coverage.
 | Cavernous Corners, two laps | Conditional covered-key pass in run 39; run 38 remains a performance failure |
 | Cyberion Highway, two laps | Conditional pass on first measured attempt, run 40 |
 | Mount Amberfalls, one lap | Conditional pass on first measured attempt, run 41 |
-| All eight Air Ride courses in menu order | Conditional completion under documented cache/roster/workarounds; original-install delivery pending |
+| All eight Air Ride courses in menu order | Conditional completion under documented cache/roster/workarounds; original installation delivered and startup/menus/clean close verified |
 
 Only source changes, tests, and summarized verification belong in this
 repository. Game files, keys, firmware, saves, native shader captures,
