@@ -356,6 +356,20 @@ struct BufferCacheTestAccess {
     static void MarkWritten(Cache& cache, BufferId id, DAddr address, u32 size) {
         cache.MarkWrittenBuffer(id, address, size);
     }
+    static void Unregister(Cache& cache, BufferId id) {
+        cache.Unregister(id);
+    }
+    static void Register(Cache& cache, BufferId id) {
+        cache.Register(id);
+    }
+    static u64 ListWrites(Cache& cache, DAddr page) {
+        std::scoped_lock lock{cache.nx2_list_mutex};
+        return cache.nx2_list_pages.at(page).writes;
+    }
+    static void ClearGpuOwnership(Cache& cache, DAddr address, u64 size) {
+        cache.memory_tracker.UnmarkRegionAsGpuModified(address, size);
+        cache.gpu_modified_ranges.Subtract(address, size);
+    }
     static size_t ReadDownloads(Cache& cache) {
         return cache.read_downloads.size();
     }
@@ -2276,4 +2290,70 @@ TEST_CASE("Claimed CPU writes keep their bytes when an earlier one downloads the
     REQUIRE(f.bytes[0x10800] == 0xbb);
     REQUIRE(f.bytes[0x1080f] == 0xbb);
     REQUIRE(f.bytes[0x10810] == 0x12);
+}
+
+TEST_CASE("Host write notifications invalidate retained list copies after unregister",
+          "[buffer_ports][list_host_write]") {
+    struct Nx2Scope {
+        bool previous{Tegra::g_nx2_ampere.exchange(true)};
+        Nx2Scope() { Tegra::Nx2ClearGpuWrittenPages(); }
+        ~Nx2Scope() {
+            Tegra::Nx2ClearGpuWrittenPages();
+            Tegra::g_nx2_ampere = previous;
+        }
+    } nx2;
+    Fixture f;
+    const bool unregister = GENERATE(false, true);
+    const bool cached_write = GENERATE(false, true);
+    CAPTURE(unregister, cached_write);
+    constexpr DAddr Page = 0x20000;
+    constexpr DAddr Address = Page + 0x40;
+    const auto id = Access::Add(*f.cache, Page, 0x10000);
+    const std::array<u32, 4> old_packet{384, 1, 0, 0};
+    const std::array<u32, 4> new_packet{96, 2, 7, 3};
+    auto& buffer = Access::Get(*f.cache, id);
+    std::memcpy(buffer.bytes.data() + 0x40, old_packet.data(), sizeof(old_packet));
+    Tegra::Nx2MarkCommandListPage(Page);
+    f.cache->Nx2CollectListCopies(true);
+    Access::MarkWritten(*f.cache, id, Page, 0x1000);
+    REQUIRE(f.cache->Nx2CopyListPages(1));
+    f.runtime.Finish();
+    f.runtime.Complete(1);
+    std::array<u32, 4> out{};
+    auto bytes = std::as_writable_bytes(std::span{out});
+    const std::span<u8> output{reinterpret_cast<u8*>(bytes.data()), bytes.size()};
+    REQUIRE(f.cache->Nx2ReadListCopy(Address, output, true) == Cache::Nx2ListRead::Copied);
+    REQUIRE(out == old_packet);
+    const u64 writes = Access::ListWrites(*f.cache, Page);
+    if (unregister) {
+        Access::Unregister(*f.cache, id);
+        REQUIRE_FALSE(f.cache->IsRegionRegistered(Address, sizeof(out)));
+    } else {
+        // The existing registered CPU-write route reaches WriteMemory once.
+        Access::ClearGpuOwnership(*f.cache, Page, 0x1000);
+        REQUIRE(f.cache->IsRegionRegistered(Address, sizeof(out)));
+    }
+    std::memcpy(f.bytes + (Address - 0x10000), new_packet.data(), sizeof(new_packet));
+    if (cached_write) {
+        f.cache->CachedWriteMemory(Address, sizeof(new_packet));
+    } else {
+        REQUIRE_FALSE(f.cache->OnCPUWrite(Address, sizeof(new_packet)));
+    }
+    // An old completed GPU copy cannot be selected over the new guest bytes.
+    REQUIRE(f.cache->Nx2ReadListCopy(Address, output, true) == Cache::Nx2ListRead::Unknown);
+    REQUIRE(Access::ListWrites(*f.cache, Page) == writes + 1);
+    f.device.ReadBlockUnsafe(Address, out.data(), sizeof(out));
+    REQUIRE(out == new_packet);
+    if (unregister) Access::Register(*f.cache, id);
+    // A subsequent actual GPU write/copy can publish a new current generation.
+    std::memcpy(buffer.bytes.data() + 0x40, new_packet.data(), sizeof(new_packet));
+    Access::MarkWritten(*f.cache, id, Page, 0x1000);
+    REQUIRE(f.cache->Nx2CopyListPages(2));
+    f.runtime.Finish();
+    f.runtime.Complete(2);
+    REQUIRE(f.cache->Nx2ReadListCopy(Address, output, true) == Cache::Nx2ListRead::Copied);
+    REQUIRE(out == new_packet);
+    REQUIRE(f.cache->Nx2NoteListHostWrite(Address, sizeof(out)));
+    REQUIRE_FALSE(f.cache->Nx2NoteListHostWrite(Address, sizeof(out)));
+    REQUIRE(f.cache->Nx2ReadListCopy(Address, output, true) == Cache::Nx2ListRead::Unknown);
 }

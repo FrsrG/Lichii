@@ -351,6 +351,31 @@ used for resource names was restored exactly after capture. The next normal
 control disables disk-cache loading, testing persisted captured-environment
 behavior without either RenderDoc or GPU-assisted validation.
 
+## Retained list copies and delivered host-write notifications
+
+The command-list copy cache can outlive registration of its source host buffer.
+Previously, `CachedWriteMemory` and `OnCPUWrite` returned early for an
+unregistered range without invalidating a retained copy. A later list read could
+therefore select that older completed GPU copy over newly written guest bytes.
+Both unregistered branches now notify the existing host-write epoch helper;
+registered routes retain their existing single notification.
+
+The actual BufferCache fixture reproduces both unregistered failures: an old
+completed copy remains `Copied` after a host write. The correction makes that
+copy `Unknown`, preserves the new guest packet, and permits a subsequent GPU
+write/copy generation to publish new data. Registered and unregistered variants
+also check one epoch increment, and the helper reports only the first
+invalidation of a current copy generation.
+
+`EDEN_NX2_LIST_HOST_WRITE_DIAG=1` logs the first 16 actual current-generation
+copy invalidations delivered through these unregistered branches, including
+API, DAddr and size. It does not read guest data, free in-flight copies, or
+change historical page-bitmap policy. Coverage is limited to delivered
+notifications: `CachedWriteMemory` has no current source callers, and retirement
+may remove CPU tracking so that ordinary later stores produce no callback.
+Runtime relevance to Kirby requires observing a relevant invalidation; the
+unit regression alone establishes neither reachability nor gameplay causality.
+
 ## Acceptance record
 
 | Check | Result |

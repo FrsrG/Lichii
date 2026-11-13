@@ -450,7 +450,8 @@ public:
     void Nx2FlushListPages(std::span<const DAddr> pages);
     /// CPU and inline writes: they reach guest memory, so a synced page stays synced, but its copy
     /// no longer holds the page.
-    void Nx2NoteListHostWrite(DAddr device_addr, u64 size);
+    /// Returns whether a current-generation copy (completed or pending) was invalidated.
+    bool Nx2NoteListHostWrite(DAddr device_addr, u64 size);
 
     /// Return true when a CPU region is modified from the GPU
     [[nodiscard]] bool IsRegionGpuModified(DAddr addr, size_t size);
@@ -635,6 +636,7 @@ private:
     /// Counts a GPU write to the command list pages in the range (invalidating their copies) and,
     /// while collecting, asks for new copies.
     void Nx2NoteListWrite(BufferId buffer_id, DAddr device_addr, u64 size);
+    void NoteUnregisteredListHostWrite(DAddr device_addr, u64 size, const char* source);
 
     [[nodiscard]] BufferId FindBuffer(DAddr device_addr, u32 size, bool sparse_compatible);
 

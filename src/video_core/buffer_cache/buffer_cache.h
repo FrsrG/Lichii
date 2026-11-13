@@ -16,6 +16,7 @@
 #include <memory>
 #include <numeric>
 #include <stdexcept>
+#include <string_view>
 #include <utility>
 #include <vector>
 #include <fmt/ranges.h>
@@ -295,6 +296,7 @@ template <class P>
 void BufferCache<P>::CachedWriteMemory(DAddr device_addr, u64 size) {
     const bool is_dirty = IsRegionRegistered(device_addr, size);
     if (!is_dirty) {
+        NoteUnregisteredListHostWrite(device_addr, size, "CachedWriteMemory");
         return;
     }
     DAddr aligned_start = Common::AlignDown(device_addr, DEVICE_PAGESIZE);
@@ -316,6 +318,7 @@ template <class P>
 bool BufferCache<P>::OnCPUWrite(DAddr device_addr, u64 size) {
     const bool is_dirty = IsRegionRegistered(device_addr, size);
     if (!is_dirty) {
+        NoteUnregisteredListHostWrite(device_addr, size, "OnCPUWrite");
         return false;
     }
     if (memory_tracker.IsRegionGpuModified(device_addr, size)) {
@@ -3427,10 +3430,11 @@ void BufferCache<P>::Nx2FlushListPages(std::span<const DAddr> pages) {
 }
 
 template <class P>
-void BufferCache<P>::Nx2NoteListHostWrite(DAddr device_addr, u64 size) {
+bool BufferCache<P>::Nx2NoteListHostWrite(DAddr device_addr, u64 size) {
+    bool invalidated = false;
     if constexpr (!IS_OPENGL) {
         if (size == 0 || !Tegra::g_nx2_has_command_list_pages.load(std::memory_order_relaxed)) {
-            return;
+            return false;
         }
         constexpr u64 page_bits = Tegra::Nx2WrittenPageBits;
         const u64 last = (std::min<u64>)((device_addr + size - 1) >> page_bits,
@@ -3448,11 +3452,32 @@ void BufferCache<P>::Nx2NoteListHostWrite(DAddr device_addr, u64 size) {
             }
             Nx2ListPage& entry = it->second;
             const bool synced = entry.synced_writes == entry.writes;
+            invalidated |= entry.copy && !entry.draw_written && !synced &&
+                           entry.copy_writes == entry.writes;
             ++entry.writes;
             if (synced) {
                 entry.synced_writes = entry.writes;
             }
         }
+    }
+    return invalidated;
+}
+
+template <class P>
+void BufferCache<P>::NoteUnregisteredListHostWrite(DAddr device_addr, u64 size,
+                                                   const char* source) {
+    if (!Nx2NoteListHostWrite(device_addr, size)) return;
+    static const bool diagnostics = [] {
+        const char* value = std::getenv("EDEN_NX2_LIST_HOST_WRITE_DIAG");
+        return value && std::string_view{value} == "1";
+    }();
+    static std::atomic<u32> logged{};
+    if (diagnostics && logged.load(std::memory_order_relaxed) < 16 &&
+        logged.fetch_add(1, std::memory_order_relaxed) < 16) {
+        LOG_WARNING(HW_GPU,
+                    "Unregistered host write invalidated a current list copy: api={} "
+                    "device_addr={:#x} size={:#x} (first 16 only)",
+                    source, device_addr, size);
     }
 }
 
