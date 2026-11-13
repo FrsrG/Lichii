@@ -7,6 +7,12 @@ The requested gameplay scope is Air Ride courses only, in menu order.
 
 ## HUD and black-screen milestone
 
+Dark-terrain diagnosis now has a default-off module-creation probe:
+`EDEN_NX2_DREF_PROBE_HASH=<full native shader hash>` substitutes scalar depth
+comparisons with 1 in a temporary SPIR-V copy, including modules loaded from
+cache. It preserves the cached module, material, geometry and exposure. This
+is an isolation experiment, not a shadow fix, and is not installed for play.
+
 The installed executable is now compiled commit
 `e23a29a1449875d560a78f0f1cea3b19d96ce3af`, SHA-256
 `d07e055e283b2a8bead63694b31f6befd2141ffed9624258f8d1ae2578f90a30`.

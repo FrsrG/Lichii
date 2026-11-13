@@ -12,6 +12,6 @@ namespace Vulkan {
 
 class Device;
 
-vk::ShaderModule BuildShader(const Device& device, std::span<const u32> code);
+vk::ShaderModule BuildShader(const Device& device, std::span<const u32> code, u64 shader_hash = 0);
 
 } // namespace Vulkan

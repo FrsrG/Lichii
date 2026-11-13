@@ -608,7 +608,7 @@ GraphicsPipeline::GraphicsPipeline(
                 if (spirv[stage].empty()) {
                     continue;
                 }
-                spv_modules[stage] = BuildShader(device, spirv[stage]);
+                spv_modules[stage] = BuildShader(device, spirv[stage], key.unique_hashes[stage + 1]);
                 if (device.HasDebuggingToolAttached()) {
                     const std::string name{
                         fmt::format("Shader {:016x}", key.unique_hashes[stage + 1])};
