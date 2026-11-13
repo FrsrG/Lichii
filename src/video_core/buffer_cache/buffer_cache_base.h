@@ -510,6 +510,12 @@ public:
     /// Return true when a region is registered on the cache
     [[nodiscard]] bool IsRegionRegistered(DAddr addr, size_t size);
 
+    /// Caller holds mutex. Visits existing buffers only; never creates or uploads a buffer.
+    template <typename Func>
+    void ForEachExistingBufferInRange(DAddr addr, u64 size, Func&& func) {
+        ForEachBufferInRange(addr, size, std::forward<Func>(func));
+    }
+
     /// Return true when a CPU region is modified from the CPU
     [[nodiscard]] bool IsRegionCpuModified(DAddr addr, size_t size);
 

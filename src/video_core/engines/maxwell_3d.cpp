@@ -1727,6 +1727,52 @@ void Maxwell3D::FrontRunMacro(Core::System& system, VideoCommon::GpuSplit& split
                 fs.origins_complete = false;
             }
         }
+        if (capture) {
+            try {
+                auto probe = VideoCommon::Nx2MacroFailure::FreezePreMmeProbe(
+                    *capture, engine.native_code, fs.parameters, fs.parameter_origins,
+                    fs.origins_complete);
+                if (probe) {
+                    // No flush, invalidation, buffer creation or wait here. Preserve the
+                    // selected words independently of mutable FIFO/origin storage.
+                    probe->map_serial = memory_manager.MapSerial();
+                    probe->host_pointer_serial = memory_manager.HostPointerSerial();
+                    const size_t bytes = probe->word_count * sizeof(u32);
+                    const auto first = memory_manager.GpuToCpuAddress(probe->gpu_address);
+                    const auto last =
+                        memory_manager.GpuToCpuAddress(probe->gpu_address + bytes - 1);
+                    if (memory_manager.GetID() != probe->address_space_id || !first || !last) {
+                        probe->cpu_status = "unmapped-or-address-space-mismatch";
+                    } else if (*first != probe->device_address ||
+                               *last != probe->device_address + bytes - 1 ||
+                               !memory_manager.IsFullyMappedRange(probe->gpu_address, bytes)) {
+                        probe->cpu_status = "translation-changed-or-noncontiguous";
+                    } else {
+                        memory_manager.ReadBlockUnsafe(probe->gpu_address, probe->cpu_words.data(),
+                                                       bytes);
+                        probe->cpu_status = "available-no-flush";
+                    }
+                    probe->map_serial_after = memory_manager.MapSerial();
+                    probe->host_pointer_serial_after = memory_manager.HostPointerSerial();
+                    if (probe->map_serial != probe->map_serial_after ||
+                        probe->host_pointer_serial != probe->host_pointer_serial_after) {
+                        probe->cpu_status = "mapping-moved-during-sample";
+                    }
+                    // DeferFunction conservatively marks Writes::Anywhere once. Publish
+                    // before Execute so this copy precedes every emit of this macro.
+                    probe->queue_position = split.Position();
+                    split.DeferFunction(
+                        [backend = rasterizer, request = std::move(*probe)]() mutable {
+                            backend->ProbeNx2PreMmeBuffer(std::move(request));
+                        });
+                    split.Publish();
+                }
+            } catch (...) {
+                LOG_WARNING(
+                    HW_GPU,
+                    "Pre-MME raw buffer probe unavailable: request preparation or queue failed");
+            }
+        }
         const auto read = [&](u32 address) {
             if (address >= Regs::NUM_REGS) {
                 if (capture) capture->Read(address, 0U);

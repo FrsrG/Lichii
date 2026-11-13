@@ -376,6 +376,44 @@ may remove CPU tracking so that ordinary later stores produce no callback.
 Runtime relevance to Kirby requires observing a relevant invalidation; the
 unit regression alone establishes neither reachability nor gameplay causality.
 
+The normal copied-path control produced another complete failed-macro origin
+trace, but no unregistered current-copy invalidation diagnostic during the run.
+It therefore does not establish that this notification correction reaches the
+observed gameplay failure.
+
+## One-shot pre-macro raw buffer comparison
+
+`EDEN_NX2_PRE_MME_BUFFER_PROBE=1` additionally requires an already armed matching
+failure capture. It selects only the complete known draw-macro body fingerprint,
+matching owner/generation, exact 5/6-word FIFO, a diagnostically large count, and
+complete contiguous body origins. The count threshold is a probe selector and
+does not validate, reject or replace guest parameters.
+
+One owned request per process freezes at most 64 bytes of selected arguments,
+their GPUVA/DAddr/address-space identity, and a separate no-flush CPU sample
+with mapping and host-pointer serials before/after. Before executing this macro,
+the front queues the backend request with `DeferFunction` and calls `Publish`.
+This conservatively marks `Writes::Anywhere` once and changes scheduling;
+the original macro words, instruction budget and execution remain unchanged.
+The GPU copy is ordered before this invocation's emits, after previously queued
+work. Explicit mapping/sample status must be considered before comparing bytes.
+
+The backend uses only an existing fully covering buffer and retains its small
+readback until completion; an absent or partially covering buffer is reported
+without creating one. Results are written alongside the capture as
+`pre-mme-buffer-probe.json`. No raw macro bodies are added to source: the selector
+stores opaque fingerprints. Local production-header probes exercise armed
+owner/generation gates, rejected/missing/noncontiguous origins, immutable request
+ownership, disabled behavior and the one-request cap for both captured entries.
+This diagnostic seeks a CPU/copy versus raw-GPU discrepancy; it is not recovery.
+
+Validation is limited to production-header freeze/gate probes for both entries,
+Maxwell translation-unit syntax compilation, cross-review, and compilation of
+the affected Vulkan object. No live GPU readback, runtime completion, byte
+comparison or gameplay benefit has been demonstrated for this probe. Mapping
+serials detect a changed mapping; they do not establish command publication or
+identify the writer. The diagnostic remains off for the next gameplay gate.
+
 ## Acceptance record
 
 | Check | Result |

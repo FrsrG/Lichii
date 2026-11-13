@@ -115,6 +115,7 @@ public:
     bool IsGpuTickDone(u64 tick) override;
     void NoteGpuWrittenCommandListSynced(DAddr page) override;
     void FlushGpuWrittenCommandListPages(std::span<const DAddr> pages) override;
+    void ProbeNx2PreMmeBuffer(VideoCommon::Nx2PreMmeBufferProbeRequest request) override;
     bool MustFlushRegion(DAddr addr, u64 size,
                          VideoCommon::CacheType which = VideoCommon::CacheType::All) override;
     VideoCore::RasterizerDownloadArea GetFlushArea(DAddr addr, u64 size) override;
@@ -197,6 +198,7 @@ private:
 
     void CaptureIndirectTrace();
     void CollectIndirectTrace();
+    void PollPreMmeBufferProbe();
     void TraceDrawFailure(std::string_view reason);
     /// Remembers render target 0 of a draw with one of Ocarina of Time's tonemap shaders.
     void TrackOotTonemappedImage(const GraphicsPipeline& pipeline);
@@ -293,6 +295,10 @@ private:
     AccelerateDMA accelerate_dma;
     FenceManager fence_manager;
     FrameDump frame_dump;
+
+    struct PreMmeBufferProbe;
+    std::unique_ptr<PreMmeBufferProbe> pre_mme_buffer_probe;
+    bool pre_mme_buffer_probe_claimed{};
 
     boost::container::static_vector<u32, MAX_IMAGE_VIEWS> image_view_indices;
     std::array<VideoCommon::ImageViewId, MAX_IMAGE_VIEWS> image_view_ids;

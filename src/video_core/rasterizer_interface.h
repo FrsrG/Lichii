@@ -17,6 +17,7 @@
 #include "video_core/cache_types.h"
 #include "video_core/engines/fermi_2d.h"
 #include "video_core/game_dlss_status.h"
+#include "video_core/nx2_pre_mme_buffer_probe.h"
 #include "video_core/gpu.h"
 #include "video_core/query_cache/types.h"
 #include "video_core/rasterizer_download_area.h"
@@ -57,6 +58,9 @@ inline thread_local bool g_signaling_query_report_fence = false;
 class RasterizerInterface {
 public:
     virtual ~RasterizerInterface() = default;
+
+    /// Optional one-shot diagnostic, invoked on the GPU owner before this macro's emits.
+    virtual void ProbeNx2PreMmeBuffer(VideoCommon::Nx2PreMmeBufferProbeRequest request) {}
 
     /// Dispatches a draw invocation
     virtual void Draw(bool is_indexed, u32 instance_count) = 0;

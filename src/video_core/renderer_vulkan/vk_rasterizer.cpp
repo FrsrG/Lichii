@@ -24,6 +24,7 @@
 #include <vector>
 
 #include <fmt/format.h>
+#include <nlohmann/json.hpp>
 
 #include "video_core/renderer_vulkan/renderer_vulkan.h"
 
@@ -76,12 +77,86 @@
 #include "video_core/nx2_debug_control.h"
 #include "video_core/nx2_fast_draw.h"
 #include "video_core/nx2_profile.h"
+#include "video_core/nx2_pre_mme_buffer_probe.h"
 
 namespace Vulkan {
 
 using Maxwell = Tegra::Engines::Maxwell3D::Regs;
 using VideoCommon::ImageViewId;
 using VideoCommon::ImageViewType;
+
+struct RasterizerVulkan::PreMmeBufferProbe {
+    using Json = nlohmann::json;
+    VideoCommon::Nx2PreMmeBufferProbeRequest request;
+    Json document;
+    std::optional<StagingBufferRef> staging;
+    u64 tick{};
+    bool pending{};
+
+    Json SampleCpu(RasterizerVulkan& owner) const {
+        Json sample{{"status", "address-space-unavailable"}};
+        std::scoped_lock lock{owner.config_mutex};
+        const auto found = owner.address_spaces.find(request.address_space_id);
+        if (found == owner.address_spaces.end() || found->second.gpu_memory == nullptr) {
+            return sample;
+        }
+        auto& memory = *found->second.gpu_memory;
+        const u64 map_serial = memory.MapSerial();
+        const u64 host_serial = memory.HostPointerSerial();
+        sample["map_serial"] = map_serial;
+        sample["host_pointer_serial"] = host_serial;
+        const size_t size = request.word_count * sizeof(u32);
+        bool contiguous = memory.IsFullyMappedRange(request.gpu_address, size);
+        for (u32 i = 0; contiguous && i < request.word_count; ++i) {
+            contiguous = memory.GpuToCpuAddress(request.gpu_address + i * sizeof(u32)) ==
+                         std::optional<DAddr>{request.device_address + i * sizeof(u32)};
+        }
+        if (contiguous) {
+            std::vector<u32> words(request.word_count);
+            memory.ReadBlockUnsafe(request.gpu_address, words.data(), size);
+            sample["words"] = words;
+            sample["status"] = "available-no-flush";
+        } else {
+            sample["status"] = "unmapped-or-translation-mismatch";
+        }
+        sample["map_serial_after"] = memory.MapSerial();
+        sample["host_pointer_serial_after"] = memory.HostPointerSerial();
+        if (map_serial != memory.MapSerial() || host_serial != memory.HostPointerSerial()) {
+            sample["status"] = "mapping-moved-during-sample";
+        }
+        return sample;
+    }
+
+    bool MatchesMapping(const Json& sample) const {
+        return sample.value("status", "") == "available-no-flush" &&
+               sample.value("map_serial", ~u64{}) == request.map_serial &&
+               sample.value("host_pointer_serial", ~u64{}) == request.host_pointer_serial &&
+               sample.value("map_serial_after", ~u64{}) == request.map_serial &&
+               sample.value("host_pointer_serial_after", ~u64{}) == request.host_pointer_serial &&
+               request.map_serial == request.map_serial_after &&
+               request.host_pointer_serial == request.host_pointer_serial_after;
+    }
+
+    void Save(std::string_view status) noexcept {
+        try {
+            document["status"] = status;
+            document["copy_tick"] = tick;
+            document["pending_gpu"] = pending;
+            if (request.output_path.has_parent_path()) {
+                std::filesystem::create_directories(request.output_path.parent_path());
+            }
+            std::ofstream file(request.output_path, std::ios::binary | std::ios::trunc);
+            file.exceptions(std::ios::failbit | std::ios::badbit);
+            file << document.dump(2);
+            file.close();
+            LOG_INFO(Render_Vulkan, "PRE-MME raw buffer probe {}: {}", request.request_id, status);
+        } catch (const std::exception& error) {
+            LOG_ERROR(Render_Vulkan, "PRE-MME raw buffer probe save failed: {}", error.what());
+        } catch (...) {
+            LOG_ERROR(Render_Vulkan, "PRE-MME raw buffer probe save failed");
+        }
+    }
+};
 
 
 namespace {
@@ -462,8 +537,14 @@ RasterizerVulkan::RasterizerVulkan(Core::Frontend::EmuWindow& emu_window_, Tegra
 
 RasterizerVulkan::~RasterizerVulkan() {
     VideoCommon::GpuSplit::Get().SetIdleHook(nullptr, nullptr);
+    PollPreMmeBufferProbe();
+    if (pre_mme_buffer_probe && pre_mme_buffer_probe->pending) {
+        // Preserve an explicit incomplete result even if shutdown cannot complete a GPU wait.
+        pre_mme_buffer_probe->Save("incomplete_shutdown");
+    }
     scheduler.WaitWorker();
     scheduler.Finish();
+    PollPreMmeBufferProbe();
 }
 
 GraphicsPipeline* RasterizerVulkan::TakeReusableDraw(bool is_indexed, bool is_indirect) {
@@ -1303,6 +1384,9 @@ void TraceWindowTarget(const Tegra::Engines::Maxwell3D& maxwell3d, Tegra::Memory
 } // Anonymous namespace
 
 void RasterizerVulkan::Draw(bool is_indexed, u32 instance_count) {
+    if (pre_mme_buffer_probe) {
+        PollPreMmeBufferProbe();
+    }
     VideoCommon::Nx2Profile::Scope profile_scope{VideoCommon::Nx2Profile::Zone::Draw};
     {
         // A draw's first and count can come from memory a skipped (rejected) compute program
@@ -1541,6 +1625,9 @@ void RasterizerVulkan::Draw(bool is_indexed, u32 instance_count) {
 }
 
 void RasterizerVulkan::DrawIndirect() {
+    if (pre_mme_buffer_probe) {
+        PollPreMmeBufferProbe();
+    }
     VideoCommon::Nx2Profile::Scope profile_scope{VideoCommon::Nx2Profile::Zone::Draw};
     const auto& params = maxwell3d->draw_manager.indirect_state;
     if (Common::DkbFrameTrace::Enabled()) {
@@ -1812,6 +1899,9 @@ void RasterizerVulkan::CollectIndirectTrace() {
 }
 
 void RasterizerVulkan::DrawTexture() {
+    if (pre_mme_buffer_probe) {
+        PollPreMmeBufferProbe();
+    }
 
     SCOPE_EXIT {
         gpu.TickWork();
@@ -2170,6 +2260,9 @@ void RasterizerVulkan::Clear(u32 layer_count) {
 }
 
 void RasterizerVulkan::DispatchCompute() {
+    if (pre_mme_buffer_probe) {
+        PollPreMmeBufferProbe();
+    }
     VideoCommon::Nx2Profile::Scope profile_scope{VideoCommon::Nx2Profile::Zone::Compute};
     FlushWork();
     gpu_memory->FlushCaching();
@@ -2436,6 +2529,181 @@ void RasterizerVulkan::FlushGpuWrittenCommandListPages(std::span<const DAddr> pa
     gpu.InvalidateGPUCache();
     std::scoped_lock lock{buffer_cache.mutex};
     buffer_cache.Nx2FlushListPages(pages);
+}
+
+void RasterizerVulkan::ProbeNx2PreMmeBuffer(
+    VideoCommon::Nx2PreMmeBufferProbeRequest request) {
+    if (!VideoCommon::GpuSplit::OwnsScheduler()) {
+        LOG_ERROR(Render_Vulkan, "PRE-MME raw buffer probe requires the scheduler owner");
+        return;
+    }
+    if (std::exchange(pre_mme_buffer_probe_claimed, true)) {
+        return;
+    }
+    try {
+        pre_mme_buffer_probe = std::make_unique<PreMmeBufferProbe>();
+        auto& probe = *pre_mme_buffer_probe;
+        probe.request = std::move(request);
+        const auto& input = probe.request;
+        probe.document = {
+            {"version", 1}, {"kind", "pre-mme-raw-vulkan-buffer"},
+            {"request_id", input.request_id}, {"start", input.start},
+            {"method", input.method}, {"generation", input.generation},
+            {"address_space_id", input.address_space_id},
+            {"front_queue_prefix", input.queue_position},
+            {"gpu_address", input.gpu_address}, {"device_address", input.device_address},
+            {"word_count", input.word_count}, {"gpu_bytes_complete", false},
+            {"boundary", "split back queue before this MME invocation's emitted methods"},
+            {"readback", "existing buffer only; raw copy without upload or dirty-range selection"},
+            {"front_mapping", {{"map_serial", input.map_serial},
+                               {"host_pointer_serial", input.host_pointer_serial},
+                               {"map_serial_after", input.map_serial_after},
+                               {"host_pointer_serial_after", input.host_pointer_serial_after}}},
+        };
+        constexpr u64 device_limit = u64{1} << Tegra::MaxwellDeviceTraits::device_virtual_bits;
+        const size_t size = input.word_count * sizeof(u32);
+        if (input.word_count == 0 ||
+            input.word_count > VideoCommon::Nx2PreMmeBufferProbeRequest::MaxWords ||
+            input.device_address >= device_limit || size > device_limit - input.device_address ||
+            input.gpu_address > (std::numeric_limits<GPUVAddr>::max)() - size) {
+            probe.Save("invalid_request");
+            return;
+        }
+        probe.document["selected_words"] = std::vector<u32>(
+            input.selected_words.begin(), input.selected_words.begin() + input.word_count);
+        probe.document["cpu_before_enqueue"] = {
+            {"status", input.cpu_status},
+            {"words", std::vector<u32>(input.cpu_words.begin(),
+                                       input.cpu_words.begin() + input.word_count)}};
+        probe.document["cpu_at_record"] = probe.SampleCpu(*this);
+        probe.document["record_host_monotonic_ns"] =
+            std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::chrono::steady_clock::now().time_since_epoch()).count();
+        if (!probe.MatchesMapping(probe.document["cpu_at_record"])) {
+            probe.Save("moving_mapping");
+            return;
+        }
+        bool overlapping_buffer = false;
+        {
+            std::scoped_lock lock{buffer_cache.mutex};
+            buffer_cache.ForEachExistingBufferInRange(input.device_address, size,
+                [&](auto, Buffer& buffer) {
+                    const DAddr base = buffer.CpuAddr();
+                    const u64 buffer_size = buffer.SizeBytes();
+                    if (probe.staging || base >= input.device_address + size ||
+                        input.device_address >= base + buffer_size) {
+                        return;
+                    }
+                    overlapping_buffer = true;
+                    if (input.device_address < base ||
+                        input.device_address - base > buffer_size ||
+                        size > buffer_size - (input.device_address - base)) {
+                        return;
+                    }
+                    const u64 offset = input.device_address - base;
+                    probe.document["buffer"] = {
+                        {"handle", fmt::format("{:#x}", std::bit_cast<u64>(buffer.Handle()))},
+                        {"device_base", base}, {"size", buffer_size}, {"offset", offset}};
+                    probe.staging = buffer_cache_runtime.DownloadStagingBuffer(size, true);
+                    probe.tick = scheduler.CurrentTick();
+                    probe.document["recording_tick"] = probe.tick;
+                    const VideoCommon::BufferCopy copy{
+                        .src_offset = offset,
+                        .dst_offset = probe.staging->offset,
+                        .size = size,
+                    };
+                    // Keep later uploads after this read. No synchronization/upload of guest
+                    // memory is performed: the comparison needs the buffer's current GPU bytes.
+                    buffer.MarkUsage(offset, size);
+                    buffer_cache_runtime.CopyBuffer(probe.staging->buffer, buffer.Handle(),
+                                                     std::span{&copy, 1}, true);
+                });
+        }
+        if (!probe.staging) {
+            probe.Save(overlapping_buffer ? "partial_buffer" : "no_buffer");
+            return;
+        }
+        // Submit only from the owner and after dropping the cache lock. Completion is polled;
+        // neither the front nor this callback waits for the GPU.
+        probe.tick = buffer_cache_runtime.SubmitForHostRead();
+        probe.pending = true;
+        probe.document["record_frame"] = render_trace_frame;
+        probe.Save("pending_gpu");
+    } catch (const vk::Exception& error) {
+        if (pre_mme_buffer_probe) {
+            auto& probe = *pre_mme_buffer_probe;
+            probe.document["vk_result"] = static_cast<s32>(error.GetResult());
+            probe.pending = false;
+            probe.Save(error.GetResult() == VK_ERROR_DEVICE_LOST ? "incomplete_gpu_loss"
+                                                                : "incomplete_probe_error");
+        }
+    } catch (const std::exception& error) {
+        if (pre_mme_buffer_probe) {
+            auto& probe = *pre_mme_buffer_probe;
+            probe.document["error"] = error.what();
+            probe.pending = false;
+            probe.Save("incomplete_probe_error");
+        }
+    }
+}
+
+void RasterizerVulkan::PollPreMmeBufferProbe() {
+    if (!pre_mme_buffer_probe || !pre_mme_buffer_probe->pending) {
+        return;
+    }
+    auto& probe = *pre_mme_buffer_probe;
+    try {
+        if (!buffer_cache_runtime.IsFreeNow(probe.tick)) {
+            return;
+        }
+        const size_t size = probe.request.word_count * sizeof(u32);
+        std::vector<u32> words(probe.request.word_count);
+        std::memcpy(words.data(), probe.staging->mapped_span.data(), size);
+        probe.document["gpu_words"] = words;
+        probe.document["gpu_bytes_complete"] = true;
+        probe.document["completion_host_monotonic_ns"] =
+            std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::chrono::steady_clock::now().time_since_epoch()).count();
+        probe.document["completion_frame"] = render_trace_frame;
+        probe.document["gpu_equals_selected"] =
+            std::ranges::equal(words, std::span{probe.request.selected_words}.first(words.size()));
+        if (probe.request.cpu_status == "available-no-flush") {
+            probe.document["gpu_equals_cpu_before_enqueue"] =
+                std::ranges::equal(words, std::span{probe.request.cpu_words}.first(words.size()));
+        }
+        const auto& at_record = probe.document["cpu_at_record"];
+        if (at_record.value("status", "") == "available-no-flush") {
+            probe.document["gpu_equals_cpu_at_record"] =
+                words == at_record["words"].get<std::vector<u32>>();
+        }
+        probe.document["cpu_at_completion"] = probe.SampleCpu(*this);
+        const auto& at_completion = probe.document["cpu_at_completion"];
+        if (at_completion.value("status", "") == "available-no-flush") {
+            probe.document["gpu_equals_cpu_at_completion"] =
+                words == at_completion["words"].get<std::vector<u32>>();
+            if (at_record.value("status", "") == "available-no-flush") {
+                probe.document["cpu_changed_since_record"] =
+                    at_record["words"] != at_completion["words"];
+            }
+        }
+        const bool same_mapping = probe.MatchesMapping(at_record) &&
+                                  probe.MatchesMapping(at_completion);
+        probe.document["mapping_matches_request"] = same_mapping;
+        probe.pending = false;
+        // Deferred staging is returned only after this exact copy tick completed, on the owner.
+        buffer_cache_runtime.FreeDeferredStagingBuffer(*probe.staging);
+        probe.staging.reset();
+        probe.Save(same_mapping ? "completed" : "moving_mapping");
+    } catch (const vk::Exception& error) {
+        probe.document["vk_result"] = static_cast<s32>(error.GetResult());
+        probe.pending = false;
+        probe.Save(error.GetResult() == VK_ERROR_DEVICE_LOST ? "incomplete_gpu_loss"
+                                                            : "incomplete_probe_error");
+    } catch (const std::exception& error) {
+        probe.document["error"] = error.what();
+        probe.pending = false;
+        probe.Save("incomplete_probe_error");
+    }
 }
 
 void RasterizerVulkan::FlushRegion(DAddr addr, u64 size, VideoCommon::CacheType which) {
@@ -3339,6 +3607,7 @@ void RasterizerVulkan::FrameDumpPass(const Framebuffer* framebuffer) {
 }
 
 void RasterizerVulkan::TickFrame() {
+    PollPreMmeBufferProbe();
     if (VideoCore::Nx2Debug::HasRequests()) {
         if (auto capture = VideoCore::Nx2Debug::TakeCapture()) {
             frame_dump.Arm(std::move(capture->directory), capture->sampled, capture->buffers,

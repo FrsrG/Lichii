@@ -2,6 +2,7 @@
 #pragma once
 
 #include "common/logging.h"
+#include "video_core/nx2_pre_mme_buffer_probe.h"
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -10,6 +11,7 @@
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <optional>
 #include <nlohmann/json.hpp>
 #include <span>
 #include <string>
@@ -204,6 +206,79 @@ struct Capture {
     }
   }
 };
+
+// Opaque FNV-1a fingerprints of the complete captured draw-macro bodies.
+// This selects a diagnostic; it never changes accepted parameters or execution.
+inline bool PreMmeProbeCodeMatches(Word start, std::span<const Word> code) {
+    const size_t count = start == 0x1d2 ? 63 : start == 0x1e7 ? 39 : 0;
+    const size_t offset = size_t{start} * 3;
+    if (!count || offset > code.size() || count > code.size() - offset) return false;
+    std::uint64_t hash = 14695981039346656037ULL;
+    for (const Word word : code.subspan(offset, count)) {
+        for (unsigned shift = 0; shift < 32; shift += 8) {
+            hash ^= (word >> shift) & 0xff;
+            hash *= 1099511628211ULL;
+        }
+    }
+    return hash == (start == 0x1d2 ? 0xbcf440bd227a151cULL : 0xcf54194d4f83d37ULL);
+}
+
+inline std::optional<Nx2PreMmeBufferProbeRequest> FreezePreMmeProbe(
+    Capture& capture, std::span<const Word> code, std::span<const Word> fifo,
+    const Json& origins, bool origins_complete) noexcept {
+    static const bool enabled = [] {
+        const char* value = std::getenv("EDEN_NX2_PRE_MME_BUFFER_PROBE");
+        return value && std::string_view{value} == "1";
+    }();
+    static std::atomic<bool> claimed{};
+    try {
+        const auto& gate = capture.gate;
+        const Word start = gate.start;
+        if (!enabled || claimed.load(std::memory_order_relaxed) ||
+            gate.phase.load(std::memory_order_acquire) != Capturing ||
+            capture.document.at("start") != start ||
+            capture.document.at("generation") != gate.generation ||
+            !PreMmeProbeCodeMatches(start, code) ||
+            fifo.size() != (start == 0x1d2 ? 5 : 6) || fifo[2] <= 1000000 ||
+            !origins_complete || !origins.is_array() || origins.size() != fifo.size())
+            return {};
+        Nx2PreMmeBufferProbeRequest request;
+        request.output_path = gate.directory / "pre-mme-buffer-probe.json";
+        request.start = start;
+        request.method = capture.document.at("method").get<Word>();
+        request.generation = gate.generation;
+        request.word_count = static_cast<u32>(fifo.size() - 1);
+        if (request.word_count > request.MaxWords) return {};
+        for (size_t i = 1; i < fifo.size(); ++i) {
+            const auto& row = origins.at(i);
+            if (!row.at("origin_known").get<bool>() ||
+                row.at("argument_source") != "parameter-word" ||
+                row.at("parameter_index") != i || row.at("argument") != fifo[i] ||
+                !row.at("source_gpu_address").is_number_unsigned() ||
+                !row.at("source_device_address").is_number_unsigned() ||
+                !row.at("address_space_id").is_number_unsigned()) return {};
+            const auto gpu = row.at("source_gpu_address").get<GPUVAddr>();
+            const auto device = row.at("source_device_address").get<DAddr>();
+            const auto asid = row.at("address_space_id").get<u64>();
+            if (i == 1) {
+                request.gpu_address = gpu;
+                request.device_address = device;
+                request.address_space_id = asid;
+            } else if (gpu != request.gpu_address + (i - 1) * 4 ||
+                       device != request.device_address + (i - 1) * 4 ||
+                       asid != request.address_space_id) return {};
+            request.selected_words[i - 1] = fifo[i];
+        }
+        bool expected = false;
+        if (!claimed.compare_exchange_strong(expected, true)) return {};
+        capture.document["pre_mme_buffer_probe"] = {
+            {"request_id", request.request_id}, {"path", request.output_path.string()},
+            {"selector", "exact captured draw body; FIFO[2] > 1000000; diagnostic only"}};
+        return request;
+    } catch (...) {
+        return {};
+    }
+}
 
 inline std::unique_ptr<Capture> Begin(const void *owner, Word start,
                                       Word method, std::uint64_t generation,
