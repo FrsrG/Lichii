@@ -78,6 +78,25 @@ cases; the original passes three and fails six. This verifies page lookup
 bounds, not host page-discard behavior. Full build and gameplay verification
 of this port are pending.
 
+## First source-fixed runtime
+
+The Windows GUI built successfully from clean commit
+`8f739adeebbaedad4c26600edf988c018a23b558`; executable SHA-256
+`0c912c9da9b42fe9fc17cb591c65be8424c2ab2ef9b431e53ed77a8a743ac1f6`.
+Its stack reserve remains 1 MiB. Stack and shader-translation CTest targets
+pass, and package import checks report no missing DLLs. A broader local
+comparison of 21 captured pipelines also produces identical output; all
+62 emitted SPIR-V modules validate for Vulkan 1.2.
+
+Starting with an empty shader cache, this executable compiles the exact
+formerly crashing pipeline and reaches the main menu. Down/Up control was
+visually confirmed. Floria Fields course selection, rider selection and
+the player/CPU roster load, but rider and roster UI is missing in this
+first cold-cache run. Back navigation subsequently reaches a persistent
+black screen. No race was started or counted as completed on this binary.
+The next controlled test uses blocking native pipeline waits; the cause
+of the missing UI is not established.
+
 ## Acceptance record
 
 | Check | Result |
@@ -86,7 +105,7 @@ of this port are pending.
 | Source traversal regression tests | 32 tests, 199 assertions pass |
 | Exact crash-pipeline differential replay | Baseline overflows; fixed passes; SPIR-V identical and valid |
 | Cold-hint method boundary probe | Fixed 9/9; baseline 3/9 |
-| Patched normal-stack startup | Pending |
+| Patched normal-stack, empty-cache startup | Exact shader compiles; main menu and control confirmed |
 | Diagnostic Floria Fields race, result, menu | Completed; macro/render errors remain |
 | Patched Floria Fields race, result, menu | Pending |
 | Floria Fields warmed repeat | Pending |
