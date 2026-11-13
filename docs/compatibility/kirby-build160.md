@@ -639,6 +639,47 @@ no unchanged repeat or advancement to course four is justified. The exact
 warmed interval must distinguish remaining pipeline compilation from GPU waits
 or memory pressure before choosing a correction.
 
+The failed warmed interval contained 16 compute keys not logged in the earlier
+attempt. All 16 were verified live/integrity-correct in the saved cache and
+covered by normal compute preloading. CPU identities/machines had also varied
+under Random selection, a plausible but unproven source of new variants.
+Run 31 explicitly matched run 30's five level-three opponents and machines.
+Although its `frame_times` window measured 33.56 FPS, continuous present deltas
+showed only 27.58 FPS across the corresponding 12.33-second interval. The
+missing 2.33 seconds aligns with an isolated screenshot phase of 2.325 seconds;
+adjacent captures cost about 0.15 seconds. This exposed observer overhead and
+a measurement gap, not a gameplay performance fix.
+
+The monitor now records continuous status-to-status present deltas and can
+disable periodic screenshots. Retrospective continuous checks retain Floria
+(minimum 53.87 FPS) and warmed Waveflow (minimum 34.42 FPS) as passes. A
+same-process rematch could not be confirmed through the black post-race menus
+and was aborted without measurement. A fresh restart restored visible menus;
+the exact fixed roster was reapplied and verified before run 33.
+
+Run 33 completed Airtopia's two laps and reached the verified celebration,
+with zero MME-limit errors/device losses and clean shutdown. Its 240-second
+measurement made no periodic GPU readbacks; start/finish images were outside
+timing. All continuous intervals met 30 FPS; racing intervals ranged from
+37.87 to 56.30 FPS. A 1.05-second single-frame hitch remains, so this is still
+a sustained-window qualification, not an absolute FPS floor or smoothness
+guarantee. Airtopia is a **conditional pass**, with warmed cache, existing
+snapshot/depth/flush and restart workarounds, and the fixed roster below.
+Removing observer overhead is not claimed to correct shader or snapshot
+semantics. Remaining courses use the corrected measurement method.
+
+| CPU | Rider | Machine | Level |
+| --- | --- | --- | --- |
+| 1 | Meta Knight | Winged Star | 3 |
+| 2 | Waddle Dee | Wagon Star | 3 |
+| 3 | King Dedede | Winged Star | 3 |
+| 4 | Susie | Wagon Star | 3 |
+| 5 | King Dedede | Winged Star | 3 |
+
+Opponent count stays five, handicap None, player Kirby/Warp Star and default
+course laps. The game resets CPU groups to Random after restart, so each
+qualification reapplies/verifies this table; this is not all-roster coverage.
+
 | Check | Result |
 | --- | --- |
 | Unmodified build-160 startup | Stack overflow reproduced |
@@ -650,7 +691,8 @@ or memory pressure before choosing a correction.
 | Floria Fields at current 30 FPS gate | Conditional pass in run 26; readable next-course access restored by restart in run 27 |
 | Pre-macro raw buffer comparison | Live stable-mapping CPU/selected/GPU agreement; earlier producer remains unknown |
 | Waveflow Waters, two laps | Conditional warmed pass in run 28; first-use run 27 below 30 FPS |
-| Remaining six courses in menu order | Pending |
+| Airtopia Ruins, two laps | Conditional fixed-roster pass in run 33 with continuous counters/no periodic readbacks |
+| Remaining five courses in menu order | Pending |
 
 Only source changes, tests, and summarized verification belong in this
 repository. Game files, keys, firmware, saves, native shader captures,
