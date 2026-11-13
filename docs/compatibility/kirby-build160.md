@@ -745,6 +745,14 @@ a maximum sampled frame interval of 181 ms. Cavernous Corners is a
 snapshot/depth/flush, rendering/menu and accumulated-cache conditions. No
 source/configuration change was needed; run 38 remains a performance failure.
 
+Run 40 completed Cyberion Highway's default two laps on its first measured
+attempt, reaching the verified celebration with zero MME-limit errors/device
+losses and clean shutdown. Every continuous interval met 30 FPS (minimum
+38.29) at unchanged full-resolution/100% settings and the fixed five-CPU roster.
+A 2.54-second transient remains; the result is a **conditional pass** under
+the existing cache, snapshot/depth/flush and rendering/menu limitations.
+No warmed repeat or additional source/configuration change was needed.
+
 | Check | Result |
 | --- | --- |
 | Unmodified build-160 startup | Stack overflow reproduced |
@@ -760,7 +768,8 @@ source/configuration change was needed; run 38 remains a performance failure.
 | Crystalline Fissure, two laps | Conditional covered-key pass in run 36; runs 34/35 remain performance failures |
 | Steamgust Forge, two laps | Conditional pass on first measured attempt, run 37 |
 | Cavernous Corners, two laps | Conditional covered-key pass in run 39; run 38 remains a performance failure |
-| Remaining two courses in menu order | Pending |
+| Cyberion Highway, two laps | Conditional pass on first measured attempt, run 40 |
+| Final course in menu order | Pending |
 
 Only source changes, tests, and summarized verification belong in this
 repository. Game files, keys, firmware, saves, native shader captures,
