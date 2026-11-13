@@ -242,8 +242,10 @@ support. No blanket texture substitution is justified by this evidence.
 
 The portable title configuration has been restored byte-for-byte after
 the diagnostic. Original installation/profile files remain untouched.
-Each course must first finish without a crash, then any performance below
-60 FPS is investigated before advancing to the next course.
+The current acceptance gate is a complete crash-free race at at least 30 FPS
+at normal game speed, followed by usable course selection, before advancing
+to the next Air Ride course in menu order. This supersedes the earlier 60 FPS
+target. Non-critical bugs are recorded for later work.
 
 ## Opt-in invalid depth-sample workaround
 
@@ -412,7 +414,41 @@ Maxwell translation-unit syntax compilation, cross-review, and compilation of
 the affected Vulkan object. No live GPU readback, runtime completion, byte
 comparison or gameplay benefit has been demonstrated for this probe. Mapping
 serials detect a changed mapping; they do not establish command publication or
-identify the writer. The diagnostic remains off for the next gameplay gate.
+identify the writer. The diagnostic was off during the subsequent gameplay
+gate; its first live comparison is recorded below.
+
+## Revised gameplay gate and live buffer comparison
+
+Run 19 used compiled `e094666`, normal speed, warmed disk cache, Wait 0,
+the invalid-depth workaround and forced list flush. Macro capture, native
+shader dumping and Vulkan diagnostic layers were disabled. A real Floria
+race reached three measured ten-second windows of 51.97, 50.55 and 38.91 FPS;
+the observed period averaged 47.20 FPS. It then exited unexpectedly after
+`VK_ERROR_DEVICE_LOST` at uptime 394.575 seconds. These are pre-crash samples,
+not a course pass. The preserved dump contains the downstream Vulkan device
+loss exception; it does not identify the faulting GPU producer.
+
+Run 20 used the clean compiled `496a218` candidate with the one-shot probe
+enabled and otherwise retained the normal configuration above, adding macro
+capture but no shader dump or Vulkan layer. The existing-buffer readback
+completed before the selected macro invocation's emitted work. Selected
+arguments, the CPU sample before enqueue, CPU at recording/completion, and raw
+GPU buffer bytes all matched. Mapping and host-pointer serials remained stable;
+the probe reported `completed`, complete GPU bytes and matching mapping identity.
+The CPU words did not change across the samples.
+
+For this specific invocation, stale selected-copy data or a CPU-versus-GPU
+buffer discrepancy is therefore not the cause of the bad macro arguments.
+The next investigation must distinguish an earlier producer/publication problem
+from command or macro ownership; this comparison identifies neither writer nor
+root cause. The probe changes scheduling once and remains diagnostic, not a fix.
+
+The run was deliberately stopped after obtaining the decisive comparison and
+exited through frontend cleanup without device loss. Its four measured windows
+were 16.18, 37.40, 38.36 and 36.29 FPS. It did not finish a race and is not an
+acceptance pass. HUD/results defects, macro warnings without demonstrated
+playability impact, and performance between 30 and 60 FPS remain deferred.
+All eight courses still require qualification; Floria remains the active course.
 
 ## Acceptance record
 
@@ -424,7 +460,8 @@ identify the writer. The diagnostic remains off for the next gameplay gate.
 | Cold-hint method boundary probe | Fixed 9/9; baseline 3/9 |
 | Patched normal-stack, empty-cache startup | Exact shader compiles; main menu and control confirmed |
 | Diagnostic Floria Fields race, result, menu | Completed; macro/render errors remain |
-| Patched Floria Fields race, result, menu | Post-race/selection trajectory without GPU loss; HUD/results unreadable; full gate pending |
+| Patched Floria Fields at current 30 FPS gate | Run 19 device loss; run 20 diagnostic stopped; no complete pass |
+| Pre-macro raw buffer comparison | Live stable-mapping CPU/selected/GPU agreement; earlier producer remains unknown |
 | Floria Fields warmed repeat | Pending |
 | Remaining courses in menu order | Pending |
 
