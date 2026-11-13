@@ -5,7 +5,27 @@ This branch starts at Lichii `build-160`, commit
 
 The requested gameplay scope is Air Ride courses only, in menu order.
 
-## Active HUD and post-race screen investigation
+## HUD and black-screen milestone
+
+The installed executable is now compiled commit
+`e23a29a1449875d560a78f0f1cea3b19d96ce3af`, SHA-256
+`d07e055e283b2a8bead63694b31f6befd2141ffed9624258f8d1ae2578f90a30`.
+Its guarded static-quad workaround restores the racing HUD and post-race UI.
+Runs 61 and 62 retain the HUD through all three Floria Fields laps, show
+readable results and return to readable course menus without restarting.
+Their minimum continuous measurement intervals are 45.85 and 51.95 FPS.
+Run 63 verifies HUD, finish, results and course-menu recovery using the actual
+installed executable and original AppData profile. Its first-use performance
+result is mixed: one ten-second interval is 17.09 FPS; the others exceed 40.
+A coincident burst of pipeline compilation explains part of that stall, with
+other overlapping work not fully attributed. This is not a sustained-30-FPS
+pass for that run. A warmed installed-profile repeat remains to be checked.
+
+The original GPU overwrite writer remains unknown; the measured UI failures
+are resolved by a narrow compatibility workaround, not a general claim of
+emulation accuracy. Unusually dark shadows remain the next investigation.
+
+## HUD and post-race investigation history
 
 The subsequent user goal requires fixing the HUD disappearing during Floria
 Fields and the black screen after its finish while audio continues. These
@@ -120,9 +140,10 @@ The fifteen continuous measurement intervals are all above 30 FPS (minimum
 is now automatic only for this title and the verified UI shader, preserving
 all mapping, draw-shape, exact CPU fingerprint and GPU-ownership guards.
 It uploads exactly 60 bytes, with no download or wait. The original GPU
-overwrite remains unidentified; this is a compatibility workaround. Fresh
-normal-launch replication and installed-profile verification are still required
-before calling the delivery complete.
+overwrite remains unidentified; this is a compatibility workaround. Run 62
+subsequently passes the same complete UI sequence with the automatic guard
+and no extra experiment flag; Run 63 verifies it in the installed profile,
+with the separate first-use performance limitation noted above.
 
 A focused tool review found a matching NVIDIA opaque-address replay failure
 in [RenderDoc issue 3880](https://github.com/baldurk/renderdoc/issues/3880), but
@@ -135,7 +156,7 @@ REA and its reconstruction companion do not add a GPU debugger to this
 source-available investigation; the installed Windows session's supported
 tools and missing providers were checked without changing configuration.
 
-## Current delivered result
+## Earlier eight-course baseline (b290954)
 
 All eight courses completed without a crash at the current sustained 30 FPS
 gate, in menu order. These are **conditional passes**: the measured continuous
@@ -160,8 +181,9 @@ were retained at full resolution. The accepted executable is compiled commit
 The delivered launcher enables the snapshot, invalid-depth and list-flush
 workarounds; the local accumulated shader cache is required for comparable
 performance. Runs 33 onward use the fixed five-CPU roster documented below.
-HUD loss, dark/incorrect shading and black post-race menus remain deferred.
-Restarting the game restores readable menus. Use the validated launcher rather
+HUD loss and black post-race menus were unresolved in this earlier baseline;
+the milestone above supersedes its restart workaround. Dark/incorrect shading
+remains unresolved. Use the validated launcher rather
 than starting the executable directly; CPU Select settings must be reapplied
 after restart for the tested roster. Earlier failed attempts remain failures.
 
