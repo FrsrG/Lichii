@@ -680,6 +680,20 @@ Opponent count stays five, handicap None, player Kirby/Warp Star and default
 course laps. The game resets CPU groups to Random after restart, so each
 qualification reapplies/verifies this table; this is not all-roster coverage.
 
+Crystalline Fissure's default two laps finished in runs 34 and 35, with
+verified celebrations, zero MME-limit errors/device losses and clean shutdowns.
+Neither qualifies. First-use run 34 had six continuous intervals below 30 FPS
+(minimum 4.89); all six overlap 160 first-observed pipeline preparations.
+The same fixed-roster warmed repeat, run 35, reduced this to one failed interval
+at 17.34 FPS, but still fails the gate. That interval overlaps 21 compute and
+three graphics preparations whose keys were absent from the preceding run's
+runtime reports, including a 1.43-second graphics preparation. New pipeline
+reports alone do not prove that their records were absent from the starting
+cache. Low commit headroom and GPU-fence waits are additional unresolved
+contributors. No periodic screenshots were taken in either measurement. The
+next step distinguishes remaining first-use variants from missed cache reuse;
+an unchanged third repeat is not yet justified. Course five remains blocked.
+
 | Check | Result |
 | --- | --- |
 | Unmodified build-160 startup | Stack overflow reproduced |
@@ -692,7 +706,8 @@ qualification reapplies/verifies this table; this is not all-roster coverage.
 | Pre-macro raw buffer comparison | Live stable-mapping CPU/selected/GPU agreement; earlier producer remains unknown |
 | Waveflow Waters, two laps | Conditional warmed pass in run 28; first-use run 27 below 30 FPS |
 | Airtopia Ruins, two laps | Conditional fixed-roster pass in run 33 with continuous counters/no periodic readbacks |
-| Remaining five courses in menu order | Pending |
+| Crystalline Fissure, two laps | Runs 34/35 finished crash-free; first-use and warmed performance failed |
+| Remaining four courses in menu order | Pending |
 
 Only source changes, tests, and summarized verification belong in this
 repository. Game files, keys, firmware, saves, native shader captures,
