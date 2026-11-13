@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <charconv>
 #include <chrono>
 #include <cmath>
 #include <condition_variable>
@@ -953,6 +954,59 @@ void RasterizerVulkan::PrepareDraw(bool is_indexed, Func&& draw_func, bool is_in
             }
         }
         return;
+    }
+    // Diagnostic only: synchronize before buffers/descriptors are configured, so Finish's
+    // command-buffer reset cannot leave this draw using state configured before the reset.
+    struct DrawSyncDiagnostic {
+        u64 shader{};
+        std::string_view mode;
+    };
+    static const DrawSyncDiagnostic draw_sync = [] {
+        const char* hash_value = std::getenv("EDEN_NX2_DRAW_SYNC_SHADER");
+        const char* mode_value = std::getenv("EDEN_NX2_DRAW_SYNC_MODE");
+        if ((!hash_value || !*hash_value) && (!mode_value || !*mode_value)) {
+            return DrawSyncDiagnostic{};
+        }
+        const std::string_view hash_text = hash_value ? hash_value : "";
+        const std::string_view mode = mode_value ? mode_value : "";
+        u64 shader{};
+        const auto parsed = std::from_chars(hash_text.data(),
+                                            hash_text.data() + hash_text.size(), shader, 16);
+        if (hash_text.size() != 16 || parsed.ec != std::errc{} ||
+            parsed.ptr != hash_text.data() + hash_text.size() || shader == 0 ||
+            (mode != "endpass" && mode != "barrier" && mode != "finish")) {
+            LOG_WARNING(Render_Vulkan,
+                        "Draw sync diagnostic disabled: expected one 16-digit nonzero "
+                        "EDEN_NX2_DRAW_SYNC_SHADER and EDEN_NX2_DRAW_SYNC_MODE=endpass|barrier|finish");
+            return DrawSyncDiagnostic{};
+        }
+        return DrawSyncDiagnostic{shader, mode};
+    }();
+    const auto sync_hashes = pipeline->ShaderHashes();
+    if (draw_sync.shader != 0 &&
+        std::ranges::find(sync_hashes, draw_sync.shader) != sync_hashes.end()) {
+        static u64 sync_matches{};
+        if (++sync_matches <= 4) {
+            LOG_WARNING(Render_Vulkan,
+                        "Draw sync diagnostic: mode={} shader={:016x} match={} frame={} "
+                        "indexed={} indirect={} (first 4 matches)",
+                        draw_sync.mode, draw_sync.shader, sync_matches, render_trace_frame,
+                        is_indexed, is_indirect);
+        }
+        scheduler.RequestOutsideRenderPassOperationContext();
+        if (draw_sync.mode == "finish") {
+            scheduler.Finish();
+        } else if (draw_sync.mode == "barrier") {
+            scheduler.Record([](vk::CommandBuffer cmdbuf) {
+                const VkMemoryBarrier barrier{
+                    .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
+                    .srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT,
+                    .dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT,
+                };
+                cmdbuf.PipelineBarrier(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                                       VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, barrier);
+            });
+        }
     }
     // Exact shader dependency test, off by default. This omits draws, not shader instructions.
     static const u64 skip_geometry_hash = [] {

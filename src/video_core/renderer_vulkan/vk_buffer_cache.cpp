@@ -28,6 +28,14 @@
 
 namespace Vulkan {
 namespace {
+bool ForceIndexBindEnabled() {
+    static const bool enabled = [] {
+        const char* value = std::getenv("EDEN_NX2_FORCE_INDEX_BIND");
+        return value != nullptr && std::strcmp(value, "1") == 0;
+    }();
+    return enabled;
+}
+
 void HostReadBarrier(vk::CommandBuffer cmdbuf) {
     const VkMemoryBarrier barrier{
         .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
@@ -383,6 +391,10 @@ BufferCacheRuntime::BufferCacheRuntime(const Device& device_, MemoryAllocator& m
       quad_index_pass(device, scheduler, descriptor_pool, staging_pool,
                       compute_pass_descriptor_queue),
       multi_range_buffers(device_) {
+    if (ForceIndexBindEnabled()) {
+        LOG_INFO(Render_Vulkan,
+                 "Diagnostic forced index binding enabled (EDEN_NX2_FORCE_INDEX_BIND=1)");
+    }
     const VkDriverIdKHR driver_id = device.GetDriverID();
     const bool enable_vertex_repack = VertexRepackEnabled();
     LOG_INFO(Render_Vulkan, "69-byte vertex layout repacking {} ({})",
@@ -739,7 +751,16 @@ void BufferCacheRuntime::BindIndexBuffer(PrimitiveTopology topology, IndexFormat
         if (bound_index_valid && vk_buffer == bound_index_buffer &&
             vk_offset == bound_index_offset && vk_index_type == bound_index_type &&
             epoch == bound_index_epoch) {
-            return;
+            if (!ForceIndexBindEnabled()) {
+                return;
+            }
+            static u32 logged_forced_hits{};
+            if (logged_forced_hits < 3) {
+                LOG_INFO(Render_Vulkan,
+                         "Diagnostic forced index binding cache hit {}: offset={:#x} type={} "
+                         "epoch={} (first 3 only)",
+                         ++logged_forced_hits, vk_offset, static_cast<u32>(vk_index_type), epoch);
+            }
         }
         bound_index_valid = true;
         bound_index_buffer = vk_buffer;
