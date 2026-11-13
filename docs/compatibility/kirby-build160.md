@@ -577,6 +577,30 @@ new actionable report before loss does not justify another unchanged attempt.
 
 ## Acceptance record
 
+### First qualified course with explicit workarounds
+
+Run 26 completed the configured three-lap Floria Fields race on normal-speed
+`b290954`, using `NULL_INVALID_DEPTH=1`, `LIST_FORCE_FLUSH=1` and
+`DRAW_CONTINUATION_SNAPSHOT=1`. Aftermath, validation layers, geometry exclusion,
+macro capture and native shader dumping were off; normal cache loading and
+Wait 0 remained enabled. The orange Kirby post-race celebration is verified.
+Twelve ten-second racing/finish-transition windows measured 53.80–58.79 FPS
+at the logged 100% speed setting. A 493.8 ms transient interval occurred;
+these windows establish the sampled sustained target, not an absolute 30 FPS
+per-frame floor. Essential track, rider and other racers remained visible.
+The final log has zero MME-limit errors and zero device-loss reports, and
+requested shutdown completed through frontend cleanup.
+
+The HUD and post-race 2D menus remain defective: the latter became entirely
+black, so seamless menu access is not qualified. A clean same-configuration
+relaunch in run 27 restored the readable course list and selected Waveflow
+Waters, the next card in menu order, with its default two laps. Floria is
+therefore a **conditional course pass** with snapshot/depth/flush workarounds
+and an explicit restart between races for usable menus. Snapshot semantic
+correctness and HUD/menu repair remain unproven/deferred. This is the first
+normal-stack course pass under the revised 30 FPS gate; the remaining seven
+courses still require independent qualification.
+
 | Check | Result |
 | --- | --- |
 | Unmodified build-160 startup | Stack overflow reproduced |
@@ -585,7 +609,7 @@ new actionable report before loss does not justify another unchanged attempt.
 | Cold-hint method boundary probe | Fixed 9/9; baseline 3/9 |
 | Patched normal-stack, empty-cache startup | Exact shader compiles; main menu and control confirmed |
 | Diagnostic Floria Fields race, result, menu | Completed; macro/render errors remain |
-| Patched Floria Fields at current 30 FPS gate | Run 19 device loss; run 20 diagnostic stopped; no complete pass |
+| Floria Fields at current 30 FPS gate | Conditional pass in run 26; readable next-course access restored by restart in run 27 |
 | Pre-macro raw buffer comparison | Live stable-mapping CPU/selected/GPU agreement; earlier producer remains unknown |
 | Floria Fields warmed repeat | Pending |
 | Remaining courses in menu order | Pending |
