@@ -188,6 +188,24 @@ with the actual capture implementation; it does not execute GPU commands.
 Actual JIT backward-loop, FIFO/DMA replay, trace-cap, and default-off probes
 also pass. The next run must still establish real origin completeness.
 
+## Earlier GPU loss without logged macro limits
+
+A controlled Floria Fields run on `ea02ae0` reached the visible race HUD,
+then lost the GPU at 110.714668 seconds, before any logged native macro
+instruction-limit failure. There were no native shader rejections and no
+armed macro capture. This establishes that logged macro-limit failures are
+not necessary for the observed GPU loss; it does not validate every draw
+argument or establish separate root causes.
+
+The matching host dump again observes `VK_ERROR_DEVICE_LOST` during a CPU
+memory read waiting for buffer downloads. The device reports 47 unknown
+instruction pointers, no explicit invalid-access address and no vendor
+record. Three earlier unmapped buffer-cache reads remain unproven as a
+cause. Repeating the macro-only capture unchanged would not address this
+earlier failure. The next diagnostic uses process-local Khronos GPU-assisted
+validation to seek a concrete shader/resource/access error. No source-fixed
+full race is counted as passed.
+
 ## Acceptance record
 
 | Check | Result |
