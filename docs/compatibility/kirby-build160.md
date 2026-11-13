@@ -29,6 +29,33 @@ front/back command path, so it can test this hypothesis. Upstream alias and
 feedback fixes are also being compared against the actual captured output.
 No rendering fix is claimed at this stage.
 
+The follow-up controls rejected back-thread-only macros and single-thread GPU
+execution as HUD fixes: both still lost the HUD and restored malformed live
+macro failures. RenderDoc replay of the affected frames failed during Vulkan
+opaque-address allocation, so replay yielded no pixel/draw result. CPU-only
+structured capture inspection nevertheless recovered valid nonzero UI draws,
+matching target/sampled image identity, enabled RGBA writes, and disabled
+depth/stencil tests. Extracted compositor SPIR-V confirms intentional inverse
+alpha composition (`sceneRGB * UIalpha + UIRGB`); changing the alpha blend
+would not be a justified fix.
+
+Run 48 supplies a visually verified visible/absent HUD pair with complete,
+untruncated native output captures. The main UI target is cleared identically
+to `(0,0,0,1)` in both. Its good frame executes 39 UI draws and produces visible
+RGB/coverage, while the bad frame executes 38 draws with the same shader set
+and leaves every pixel at the transparent clear value. Smaller UI targets
+already lose RGB earlier in the bad frame. The first demonstrated failure is
+therefore UI rendering before final composition, not missing presentation.
+Initial phase misclassifications in run 47 and a help-popup false alarm in run
+49 are explicitly rejected as bad-HUD evidence. Buffer readbacks can add
+barriers/render-pass breaks/waits and may change the failure; they are not a fix.
+
+A default-off shader filter now limits diagnostic frame-dump buffer readbacks
+to selected pipelines, preserving the shared capture budget. This is diagnostic
+tooling only. The subsequent full-draw-resolution control still loses the HUD
+with no reported pipeline/view/texture-buffer reuse mismatches. Texture memo
+resolution and GPU visibility remain separate required discriminators.
+
 ## Current delivered result
 
 All eight courses completed without a crash at the current sustained 30 FPS
