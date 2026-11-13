@@ -206,6 +206,36 @@ earlier failure. The next diagnostic uses process-local Khronos GPU-assisted
 validation to seek a concrete shader/resource/access error. No source-fixed
 full race is counted as passed.
 
+## Instrumented texture-comparison report
+
+A process-local Khronos GPU-assisted validation run, with disk shader cache
+loading disabled to limit instrumentation work, reports
+`VUID-vkCmdDrawIndexed-None-06479`: fragment sampler binding 42, array index
+0, samples an `A8B8G8R8_UNORM_PACK32` color view using
+`OpImageSampleDrefImplicitLod`. The format lacks sampled depth-comparison
+support. The shader variable `fs_tex5_00x1024` identifies constant-buffer 5,
+byte offset 0, array count 1024; the suffix is not a byte offset.
+
+The instrumented process later terminates with an access violation inside
+the validation layer on its Vulkan submission worker, after the layer
+reports a failed fence wait. No application device-loss or macro-limit
+message was logged. This termination is distinct from the ordinary run's
+application-side device-loss exception. The report is a concrete binding
+lead, not yet a confirmed explanation or fix for that loss. The exact
+fragment hash and bound handle/view context remain to be captured.
+
+Native fragment captures explicitly request comparison sampling; the TEX
+shadow fix does not modify comparison flags or these captured comparison
+instructions' low-register operands. RTX 5070 advertises null descriptors,
+and the device feature path preserves them, so a nonnull color view is
+unlikely to be the fallback constructed for devices without null-descriptor
+support. No blanket texture substitution is justified by this evidence.
+
+The portable title configuration has been restored byte-for-byte after
+the diagnostic. Original installation/profile files remain untouched.
+Each course must first finish without a crash, then any performance below
+60 FPS is investigated before advancing to the next course.
+
 ## Acceptance record
 
 | Check | Result |
