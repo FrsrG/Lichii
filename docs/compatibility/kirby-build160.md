@@ -261,6 +261,37 @@ the MME execution budget. Both affected production translation units pass
 syntax checks. No existing descriptor-queue fixture covers this path; the
 targeted full-race runtime comparison is the required behavioral validation.
 
+## Floria command-source control and post-race trajectory
+
+On `2574a43`, the null-depth workaround alone still loses the GPU. Its
+complete macro-origin capture identifies an accepted six-word packet:
+one argument comes from a submission snapshot, and the next five are
+fetched from a copied command-list page. Those five actual values are
+float-like position data, unlike the current mutable snapshot. Offline
+replay reproduces the input-driven macro failure; the parser delivered
+the fetched words faithfully.
+
+Adding only `EDEN_NX2_LIST_FORCE_FLUSH=1` changes those continuation reads
+to `slow-guest-memory`, yet malformed parameters and macro failures remain.
+A defect confined to the staging-copy path therefore cannot explain them.
+The GPU-written provenance flag means a 4 KiB page was written sometime in
+the session; it does not prove a current producer for these argument bytes.
+The flush also gates actual GPU readback on current cache dirty ranges.
+
+This control run reaches the orange Kirby post-race pose and subsequent
+selection transitions, then closes cleanly: no device loss during gameplay
+or shutdown, 649 macro-limit failures, zero native shader rejections.
+The HUD and menu/result text disappear, so placement, finish time and a
+usable post-race menu are not verified. Point FPS samples of 44.9 and 56.6
+are observations, not a steady performance benchmark. This is a partial
+progression milestone, not a playable-build or 60 FPS acceptance pass.
+
+Both captured failures have equal zero semaphore-suspension counters,
+excluding semaphore-driven snapshot refresh for these calls. An earlier
+map-deferred fill remains possible. Submission does not record writer,
+host-write or mapping generations, so the existing evidence cannot yet
+distinguish CPU ring reuse from genuinely GPU-produced argument data.
+
 ## Acceptance record
 
 | Check | Result |
@@ -271,7 +302,7 @@ targeted full-race runtime comparison is the required behavioral validation.
 | Cold-hint method boundary probe | Fixed 9/9; baseline 3/9 |
 | Patched normal-stack, empty-cache startup | Exact shader compiles; main menu and control confirmed |
 | Diagnostic Floria Fields race, result, menu | Completed; macro/render errors remain |
-| Patched Floria Fields race, result, menu | Pending |
+| Patched Floria Fields race, result, menu | Post-race/selection trajectory without GPU loss; HUD/results unreadable; full gate pending |
 | Floria Fields warmed repeat | Pending |
 | Remaining courses in menu order | Pending |
 
