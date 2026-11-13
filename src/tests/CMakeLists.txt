@@ -313,6 +313,15 @@ target_compile_definitions(shader_translation_tests PRIVATE
     SHADER_SWEEP_FIXTURES="${PROJECT_SOURCE_DIR}/tools/shader-sweep/fixtures")
 add_test(NAME shader_translation_tests COMMAND shader_translation_tests)
 
+add_executable(shader_stack_tests
+    video_core/shader_stack.cpp
+    video_core/storage_buffer_pointer_tracking.cpp
+    video_core/storage_buffer_control_flow.cpp
+    video_core/storage_buffer_shared_tracking.cpp)
+target_link_libraries(shader_stack_tests PRIVATE common shader_recompiler
+    Catch2::Catch2WithMain Threads::Threads)
+add_test(NAME shader_stack_tests COMMAND shader_stack_tests)
+
 if (NOT ANDROID)
     target_sources(tests PRIVATE input_common/joycon_subcommand_response.cpp)
     target_link_libraries(tests PRIVATE SDL3::SDL3)

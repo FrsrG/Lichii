@@ -306,25 +306,28 @@ inline IR::Inst* Value::Inst() const {
 }
 
 inline IR::Inst* Value::InstRecursive() const {
-    DEBUG_ASSERT(type == Type::Opaque);
-    if (IsIdentity()) {
-        return inst->Arg(0).InstRecursive();
+    Value value{*this};
+    while (value.IsIdentity()) {
+        value = value.inst->Arg(0);
     }
-    return inst;
+    DEBUG_ASSERT(value.type == Type::Opaque);
+    return value.inst;
 }
 
 inline IR::Inst* Value::TryInstRecursive() const {
-    if (IsIdentity()) {
-        return inst->Arg(0).TryInstRecursive();
+    Value value{*this};
+    while (value.IsIdentity()) {
+        value = value.inst->Arg(0);
     }
-    return type == Type::Opaque ? inst : nullptr;
+    return value.type == Type::Opaque ? value.inst : nullptr;
 }
 
 inline IR::Value Value::Resolve() const {
-    if (IsIdentity()) {
-        return inst->Arg(0).Resolve();
+    Value value{*this};
+    while (value.IsIdentity()) {
+        value = value.inst->Arg(0);
     }
-    return *this;
+    return value;
 }
 
 inline IR::Reg Value::Reg() const {
