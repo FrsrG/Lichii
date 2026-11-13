@@ -723,6 +723,16 @@ this is a **conditional pass** under the accumulated local cache and existing
 snapshot/depth/flush, rendering and menu-restart limitations. No warmed repeat
 or additional source/configuration change was needed.
 
+Run 38 completed Cavernous Corners' default two laps and reached the verified
+celebration, with zero MME-limit errors/device losses and clean shutdown.
+One continuous interval measured 27.42 FPS, so the first-use attempt fails
+performance and course seven remains blocked. That interval overlaps 14
+compute preparations totaling 579 ms and a 1.64-second frame interval;
+nearby GPU-fence reporting includes a 1.63-second wait. Preparation alone
+does not account for the full stall. Adjacent intervals recovered to 54–58
+FPS. Exact cache/preload coverage is being checked before selecting a repeat
+or correction; the existing rendering/menu limitations remain unchanged.
+
 | Check | Result |
 | --- | --- |
 | Unmodified build-160 startup | Stack overflow reproduced |
@@ -737,7 +747,8 @@ or additional source/configuration change was needed.
 | Airtopia Ruins, two laps | Conditional fixed-roster pass in run 33 with continuous counters/no periodic readbacks |
 | Crystalline Fissure, two laps | Conditional covered-key pass in run 36; runs 34/35 remain performance failures |
 | Steamgust Forge, two laps | Conditional pass on first measured attempt, run 37 |
-| Remaining three courses in menu order | Pending |
+| Cavernous Corners, two laps | Run 38 finished crash-free but failed one performance interval |
+| Remaining two courses in menu order | Pending |
 
 Only source changes, tests, and summarized verification belong in this
 repository. Game files, keys, firmware, saves, native shader captures,
