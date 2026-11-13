@@ -733,6 +733,18 @@ does not account for the full stall. Adjacent intervals recovered to 54–58
 FPS. Exact cache/preload coverage is being checked before selecting a repeat
 or correction; the existing rendering/menu limitations remain unchanged.
 
+The bounded cache audit found all 14 compute keys and exact native instruction
+fingerprints absent at run 38 startup and correctly persisted afterward. Run
+39's actual startup prefix contained all 14 captured contexts, with intact
+records and unconditional compute admission; logged settings matched run 38.
+One covered-key comparison was therefore justified. It completed both laps and
+reached the verified celebration, with zero MME-limit errors/device losses and
+clean shutdown. Every continuous interval exceeded 30 FPS (minimum 52.86), with
+a maximum sampled frame interval of 181 ms. Cavernous Corners is a
+**conditional covered-cache pass**, using the same fixed roster and existing
+snapshot/depth/flush, rendering/menu and accumulated-cache conditions. No
+source/configuration change was needed; run 38 remains a performance failure.
+
 | Check | Result |
 | --- | --- |
 | Unmodified build-160 startup | Stack overflow reproduced |
@@ -747,7 +759,7 @@ or correction; the existing rendering/menu limitations remain unchanged.
 | Airtopia Ruins, two laps | Conditional fixed-roster pass in run 33 with continuous counters/no periodic readbacks |
 | Crystalline Fissure, two laps | Conditional covered-key pass in run 36; runs 34/35 remain performance failures |
 | Steamgust Forge, two laps | Conditional pass on first measured attempt, run 37 |
-| Cavernous Corners, two laps | Run 38 finished crash-free but failed one performance interval |
+| Cavernous Corners, two laps | Conditional covered-key pass in run 39; run 38 remains a performance failure |
 | Remaining two courses in menu order | Pending |
 
 Only source changes, tests, and summarized verification belong in this
