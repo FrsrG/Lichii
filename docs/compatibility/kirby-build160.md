@@ -714,6 +714,15 @@ covered-cache pass**, not a source/cache correctness fix, smoothness guarantee
 or coverage of every random effect/roster. Earlier performance failures remain
 failures. Course five may now proceed.
 
+Run 37 completed Steamgust Forge's default two laps on its first measured
+attempt, reaching the verified celebration with zero MME-limit errors/device
+losses and clean shutdown. All 24 continuous intervals met 30 FPS (minimum
+40.18), at the same full resolution, normal 100% speed and fixed five-CPU
+roster. No periodic screenshots were taken. A 2.07-second transient remains;
+this is a **conditional pass** under the accumulated local cache and existing
+snapshot/depth/flush, rendering and menu-restart limitations. No warmed repeat
+or additional source/configuration change was needed.
+
 | Check | Result |
 | --- | --- |
 | Unmodified build-160 startup | Stack overflow reproduced |
@@ -727,7 +736,8 @@ failures. Course five may now proceed.
 | Waveflow Waters, two laps | Conditional warmed pass in run 28; first-use run 27 below 30 FPS |
 | Airtopia Ruins, two laps | Conditional fixed-roster pass in run 33 with continuous counters/no periodic readbacks |
 | Crystalline Fissure, two laps | Conditional covered-key pass in run 36; runs 34/35 remain performance failures |
-| Remaining four courses in menu order | Pending |
+| Steamgust Forge, two laps | Conditional pass on first measured attempt, run 37 |
+| Remaining three courses in menu order | Pending |
 
 Only source changes, tests, and summarized verification belong in this
 repository. Game files, keys, firmware, saves, native shader captures,
