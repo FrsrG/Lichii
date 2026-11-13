@@ -63,6 +63,7 @@ add_executable(tests
     input_common/calibration_lifetime.cpp
     video_core/ampere_logged_numeric.cpp
     video_core/ampere_logged_textures.cpp
+    video_core/ampere_texture_pressure.cpp
     video_core/native_texture_header_index.cpp
     video_core/texture_alias_ticks.cpp
     video_core/sampled_views.cpp
@@ -315,6 +316,7 @@ add_test(NAME shader_translation_tests COMMAND shader_translation_tests)
 
 add_executable(shader_stack_tests
     video_core/shader_stack.cpp
+    video_core/ampere_texture_pressure.cpp
     video_core/storage_buffer_pointer_tracking.cpp
     video_core/storage_buffer_control_flow.cpp
     video_core/storage_buffer_shared_tracking.cpp)

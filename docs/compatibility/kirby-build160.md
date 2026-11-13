@@ -97,6 +97,40 @@ black screen. No race was started or counted as completed on this binary.
 The next controlled test uses blocking native pipeline waits; the cause
 of the missing UI is not established.
 
+## TEX register shadows
+
+A separate startup-attract run exposed four native compute shader rejections
+at TEX instructions using high registers. Register-pressure handling omitted
+TEX operand spans, including the secondary destination and a high Rb source.
+The fix derives spans from the existing TEX packing rules and preserves
+coordinate inputs, split/half outputs and uniform mirrors. Four captured raw
+programs now lower completely instead of rejecting.
+
+The focused suite passes 36 tests and 265 assertions, including register-bank
+state checks and packing/boundary cases. Replaying those four full programs
+still needs uncaptured storage-pointer context; no actual-capture SPIR-V
+validation is claimed for them. The native cache lowering stamp automatically
+changes from `a50b9d25fc7212aa` to `0764a4eac4ed9238`, invalidating stale
+lowered records. This fixes observed attract-mode shader rejections; it has
+not been established as the cause of the Air Ride macro/device-loss failure.
+
+## Current race investigation
+
+The first controlled source-fixed Floria Fields race reached lap 1 with a
+visible timer, then lost the GPU. The dump shows a downstream Vulkan
+device-loss exception while a CPU memory read waits for GPU downloads, not
+the original compiler stack overflow. Native macro instruction-limit errors
+precede the loss; the dump alone does not establish causality.
+
+A bounded opt-in diagnostic capture reproduced the macro's behavior exactly
+offline. Both JIT and interpreter receive float-looking values as original
+draw parameters, including a multi-billion instance count. Increasing the
+execution limit or interpreter fallback does not correct those inputs.
+Immediate inline invalidation did not resolve this symptom. A separate
+draw-written-page drain test also retained the errors, but its diagnostics
+showed only compute/copy-written list pages. The remaining work is to trace
+the parameter bytes to their command entry and correct the failing path.
+
 ## Acceptance record
 
 | Check | Result |

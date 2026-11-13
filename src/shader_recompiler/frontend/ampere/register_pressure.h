@@ -13,6 +13,32 @@ struct RegisterPressure {
     std::vector<u64> prefix, suffix;
     bool valid = true;
 };
+struct TextureRegisterSpan {
+    u32 bit, count;
+};
+// TEX packs its coordinate/meta inputs over Ra and Rb; RGB(A) results can use a second
+// destination. Match general_tex's packing before deciding which guest registers need shadows.
+inline std::array<TextureRegisterSpan, 4> TextureRegisterSpans(const Instruction& input) {
+    const u32 opcode = input.Bits(0, 12);
+    if (opcode != 0xb60 && opcode != 0xf60 && opcode != 0x361)
+        return {};
+    constexpr std::array<u32, 8> coordinate_count{1, 2, 3, 3, 2, 3, 0, 4};
+    const u32 dimension = input.Bits(61, 3), mask = input.Bits(72, 4);
+    if (dimension == 6 || mask == 0)
+        return {};
+    const u32 coordinates = coordinate_count[dimension], lod = input.Bits(87, 3);
+    const u32 count = coordinates + (opcode == 0x361 ? 1U : 0U) +
+                      (lod == 2 || lod == 3 || lod == 6 || lod == 7 ? 1U : 0U) +
+                      input.Bits(76, 1) + input.Bits(78, 1);
+    const u32 in_a = opcode == 0x361 && !input.Bits(60, 1) ? coordinates
+                    : count <= 4 ? (count + 1) / 2 : opcode == 0x361 ? coordinates : 4;
+    const u32 components = static_cast<u32>(std::popcount(mask));
+    const bool split = input.Bits(64, 8) != 255, half = input.Bits(79, 1) != 0;
+    const u32 first = half ? (split ? 1U : (components + 1) / 2)
+                          : split ? (std::min)(components, 2U) : components;
+    const u32 second = split && components > 2 ? (half ? 1U : components - 2) : 0;
+    return {{{16, first}, {24, in_a}, {32, count - in_a}, {64, second}}};
+}
 inline u64 NativeRegisterCopy(u32 destination_bank, u32 destination, u32 source_bank, u32 source) {
     return 0x5c98000000070000ULL | (u64{10} << 44) | destination | (u64{destination_bank} << 8) |
            (u64{source_bank} << 10) | (u64{source} << 20);
@@ -107,6 +133,18 @@ inline RegisterPressure PrepareRegisterPressure(const Instruction& input, u32 re
     case 0x9a8: // ATOMG: result in Rd, data operand at bit 32.
         operand(16);
         operand(32);
+        break;
+    case 0xb60:
+    case 0xf60:
+    case 0x361:
+        for (const auto [bit, count] : TextureRegisterSpans(input)) {
+            if (count != 0)
+                operand(bit, count);
+        }
+        if (operands.empty()) {
+            result.valid = false;
+            return result;
+        }
         break;
     case 0xb6c:
     case 0xf6c: // TXD: results in Rd/Rd+1 and the second pair, coordinates in Ra (Ra+2 is the layer
