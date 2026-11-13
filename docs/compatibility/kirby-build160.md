@@ -631,6 +631,14 @@ pipeline work. Preparation timings do not fully explain the long frame waits.
 One unchanged warmed repeat is justified; Airtopia and all later courses remain
 unqualified until the full performance gate is met.
 
+The warmed Airtopia repeat in run 30 also completed without MME-limit errors
+or device loss and closed cleanly, but one window measured 24.92 FPS with a
+2.58-second maximum interval. It therefore remains a performance failure under
+the current gate. This is a different interval from the first-use failure;
+no unchanged repeat or advancement to course four is justified. The exact
+warmed interval must distinguish remaining pipeline compilation from GPU waits
+or memory pressure before choosing a correction.
+
 | Check | Result |
 | --- | --- |
 | Unmodified build-160 startup | Stack overflow reproduced |
