@@ -557,6 +557,24 @@ course navigation, at least 30 FPS, and usable track/rider/obstacle visibility.
 Essential missing geometry invalidates the workaround; minor omitted effects
 must be named. A non-matching selector or another crash cannot qualify it.
 
+Run 24 rejects that exclusion as sufficient recovery. The guard logged matches
+for the intended linked pipeline (first four indexed counts 7, 9, 11 and 13),
+yet the normal, Aftermath-disabled attempt lost the device at uptime 129.865
+seconds, tick 38675, and exited unexpectedly. The race-entry input completed
+and a course/rider image was captured, with missing HUD and black patches;
+there was no finish and no completed ten-second FPS window. The log has 51
+MME-limit failures. No specific visual omission was established, and the
+candidate exclusion is retired rather than extended to other shaders.
+
+The next diagnostic revisits GPU-assisted validation with the invalid-depth
+workaround enabled. Earlier validation preceded that workaround and first
+reported the known Dref/color-view violation. The concrete question is whether
+validation can now expose a new actionable resource-access error preceding
+loss. It disables the geometry exclusion, macro capture and native shader dump.
+Cache loading is disabled only for diagnostic startup/instrumentation coverage;
+normal settings must be restored afterward. A repeated old Dref report or no
+new actionable report before loss does not justify another unchanged attempt.
+
 ## Acceptance record
 
 | Check | Result |
