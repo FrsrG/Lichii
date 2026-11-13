@@ -116,7 +116,12 @@ void MasterSemaphore::Wait(u64 tick) {
         LOG_CRITICAL(Render_Vulkan, "Waiting for GPU tick {} failed: {}", tick, exception.what());
         if (exception.GetResult() == VK_ERROR_DEVICE_LOST) {
             try {
-                device.ReportDeviceFault();
+                if (Settings::values.enable_nsight_aftermath) {
+                    // Aftermath's dump callback is asynchronous to the Vulkan loss.
+                    device.ReportLoss();
+                } else {
+                    device.ReportDeviceFault();
+                }
             } catch (const std::exception& fault_error) {
                 LOG_CRITICAL(Render_Vulkan, "Device fault reporting failed: {}", fault_error.what());
             } catch (...) {

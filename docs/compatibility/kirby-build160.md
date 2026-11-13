@@ -455,8 +455,37 @@ feature-guarded Vulkan device-fault reporter on `VK_ERROR_DEVICE_LOST` before
 rethrowing the original exception. Reporting exceptions cannot mask that
 original failure, and no normal-execution behavior or recovery is added.
 This covers the observed wait exception, not failures from the separate counter
-refresh calls outside that catch. The affected translation unit compiles; live
-driver fault data and a gameplay benefit have not been demonstrated.
+refresh calls outside that catch. The affected translation unit compiles;
+that check alone did not establish live fault reporting or gameplay benefit.
+
+Run 21 verified that reporting path: a normal Floria attempt on `7da1cea`
+lost the device at uptime 188.949 seconds (tick 76606) and exited unexpectedly.
+Five completed ten-second windows ranged from 34.78 to 43.38 FPS, averaging
+38.71 over the observed period; the subsequent 14 seconds before connection
+reset were unmeasured. There was no finish or course pass.
+The driver returned 165 unique instruction-pointer-unknown records, each with
+16-byte precision, no vendor records and an empty description. None was
+classified as invalid memory access or a fault-associated instruction pointer.
+[Khronos defines these unknown pointers](https://docs.vulkan.org/refpages/latest/refpages/source/VkDeviceFaultAddressTypeKHR.html)
+as potentially unrelated to the fault; these records do not identify a shader.
+
+The next diagnostic enables the existing optional Aftermath integration with
+the official NVIDIA 2026.3 SDK. The SDK archive is kept local, has SHA-256
+`e38136a60110199559b7365d3ea4ec0cb5588dc2b0f593877d864e0299659a3f`, and
+its DLL has a valid NVIDIA signature. The tracker registers before logical
+device creation and existing module paths retain SPIR-V. To make its existing
+automatic-checkpoint flag effective, the diagnostics-only device path now
+enables `VK_NV_device_diagnostic_checkpoints` when supported, omits the flag
+otherwise, and logs availability. The caught device-loss path uses the existing
+15-second `ReportLoss` wait only when Aftermath is enabled, allowing time for
+the asynchronous dump callback before rethrow. No shader-error-reporting mode
+or normal gameplay behavior is added.
+
+The changed device, tracker and semaphore objects compile against SDK 2026.3.
+Full diagnostic build, runtime initialization, shader-debug output and crash
+dump collection remain unverified. One reproduction is conditional on verifying
+initialization/output first; this is crash diagnosis and cannot qualify a fix.
+[NVIDIA documents the collection requirements](https://docs.nvidia.com/nsight-aftermath/SDK/index.html).
 
 ## Acceptance record
 
