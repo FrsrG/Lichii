@@ -502,6 +502,35 @@ restored byte-for-byte (SHA-256 beginning `f3084cc6`); the title profile remaine
 unchanged. Startup stacks must justify any correction before another attempt;
 no cache sweep or arbitrary longer wait is justified by missing sidecars.
 
+The user requested an unchanged retry after reporting that another game had
+been open. Run 23 reached a verified Air Ride menu at uptime 202.66 seconds,
+within the same startup bound, with identical executable/settings. This does
+not establish contention as the reason for the earlier delay. No cache or
+shader-debug flag change was needed. The retained startup snapshot from run 22
+also places busy workers in NVIDIA compute-pipeline creation from cached
+preloading, rather than an observed Aftermath callback deadlock.
+
+Run 23 selected Floria and reached the Take Off roster. The race-start input
+sequence then lost its connection before completing and before a race HUD
+could be verified. Device loss at uptime 279.13 seconds produced a 267,544-byte
+Aftermath GPU dump, a 109,672-byte shader-debug file, retained SPIR-V and JSON.
+The device state is `Hung`, with an engine reset and no adapter reset.
+Automatic checkpoint stacks identify direct indexed Vulkan draws; the dump
+has 18 active warps from one Geometry shader, SDK hash `06a4396286b6d8f8`.
+Offline SDK decoding resolves all 18 PCs using the exact retained 224,688-byte
+SPIR-V. That module consumes points and emits a triangle strip, with at most
+eight output vertices. The SDK's intermediate filename/line numbers are not
+guest source and must not be matched blindly to another disassembly's lines.
+
+The active shader is a correlation at reset, not proof of faulty translation.
+The SDK page-fault query returns `NotAvailable`, which does not prove absence
+of a memory fault. This run logs zero native MME instruction-limit failures,
+so such a failure is not a necessary logged precursor to device loss. The
+critical next step is exact shader/pipeline and workload analysis offline;
+another broad macro or settings experiment is not justified by this capture.
+The owned process exited unexpectedly, and the portable global profile was
+restored exactly. This is a verified crash-capture milestone, not a course pass.
+
 ## Acceptance record
 
 | Check | Result |
