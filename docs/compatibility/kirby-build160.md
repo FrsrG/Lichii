@@ -111,6 +111,19 @@ earlier GPU writer remains unknown. A guarded refresh of only the recognized
 static UI quad is the next causal workaround test, not a claim that the
 underlying GPU writer has been fixed.
 
+Run 61 validates that guarded workaround without captures, buffer tracing,
+extra synchronization or shader exclusion. Floria Fields completes all three
+laps with the racing HUD retained, readable fourth-place results at 1:53.85,
+and a readable milestone/rider/course menu sequence in the same process.
+The fifteen continuous measurement intervals are all above 30 FPS (minimum
+45.85 FPS; whole-period 53.03 FPS). The emulator closes cleanly. The refresh
+is now automatic only for this title and the verified UI shader, preserving
+all mapping, draw-shape, exact CPU fingerprint and GPU-ownership guards.
+It uploads exactly 60 bytes, with no download or wait. The original GPU
+overwrite remains unidentified; this is a compatibility workaround. Fresh
+normal-launch replication and installed-profile verification are still required
+before calling the delivery complete.
+
 A focused tool review found a matching NVIDIA opaque-address replay failure
 in [RenderDoc issue 3880](https://github.com/baldurk/renderdoc/issues/3880), but
 no general documented repair for these existing captures. Repeating the

@@ -3962,7 +3962,7 @@ void BufferCache<P>::MappedUploadMemory([[maybe_unused]] Buffer& buffer,
 }
 
 template <class P>
-bool BufferCache<P>::DebugRefreshGpuOwnedRange(DAddr dest_address, std::span<const u8> bytes) {
+bool BufferCache<P>::RefreshValidatedStaticRange(DAddr dest_address, std::span<const u8> bytes) {
     if constexpr (!USE_MEMORY_MAPS_FOR_UPLOADS) {
         return false;
     } else {

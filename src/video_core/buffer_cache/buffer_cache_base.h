@@ -340,9 +340,9 @@ public:
 
     bool InlineMemory(DAddr dest_address, size_t copy_size, std::span<const u8> inlined_buffer);
 
-    /// Diagnostic caller holds mutex. Refreshes an existing GPU-owned range in order, without
-    /// downloads, waits, cache creation, or tracker-page uploads.
-    bool DebugRefreshGpuOwnedRange(DAddr dest_address, std::span<const u8> bytes);
+    /// Caller holds mutex and validates an immutable CPU fingerprint. Refreshes an existing
+    /// GPU-owned range in order, without downloads, waits, cache creation, or tracker-page uploads.
+    bool RefreshValidatedStaticRange(DAddr dest_address, std::span<const u8> bytes);
 
     void BindGraphicsUniformBuffer(size_t stage, u32 index, GPUVAddr gpu_addr, u32 size);
 

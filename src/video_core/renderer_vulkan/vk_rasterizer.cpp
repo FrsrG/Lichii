@@ -1188,20 +1188,17 @@ void RasterizerVulkan::PrepareDraw(bool is_indexed, Func&& draw_func, bool is_in
         mesh_emulation_vertices_per_group = pipeline->MeshEmulationVerticesPerGroup();
     }
     std::scoped_lock lock{buffer_cache.mutex, texture_cache.mutex};
-    static const bool static_quad_refresh = [] {
-        const char* value = std::getenv("EDEN_NX2_STATIC_UI_QUAD_REFRESH");
-        return value && std::string_view{value} == "1";
-    }();
     bool static_quad_refreshed = false;
-    // Diagnostic control for the one decoded native UI layout, not a general buffer repair.
-    if (static_quad_refresh && Settings::GetCurrentProgramID() == 0x040077201BE50000ULL &&
+    // This UI program uses an immutable quad whose host cache bytes can be overwritten while
+    // the CPU copy stays valid. Restore only that validated range before configuring the draw.
+    if (Settings::GetCurrentProgramID() == 0x040077201BE50000ULL &&
         pipeline->ShaderHashes()[1] == 0xe406adca8a4b9a53ULL) {
         const auto& draw = maxwell3d->draw_manager.draw_state;
         const auto skip = [&](u32 reason, std::string_view text) {
             static std::array<u32, 6> counts{};
             if (++counts[reason] <= 2) {
-                LOG_WARNING(Render_Vulkan, "Static UI quad diagnostic skipped: {} (reason={} count={})",
-                            text, reason, counts[reason]);
+                LOG_DEBUG(Render_Vulkan, "Static UI quad refresh skipped: {} (reason={} count={})",
+                          text, reason, counts[reason]);
             }
         };
         const auto refresh = [&] {
@@ -1253,17 +1250,17 @@ void RasterizerVulkan::PrepareDraw(bool is_indexed, Func&& draw_func, bool is_in
                 return false;
             }
             const std::span<const u8> source{reinterpret_cast<const u8*>(bytes.data()), sizeof(bytes)};
-            if (!buffer_cache.DebugRefreshGpuOwnedRange(*device_address, source)) {
+            if (!buffer_cache.RefreshValidatedStaticRange(*device_address, source)) {
                 skip(5, "no existing host buffer covers the GPU-owned quad");
                 return false;
             }
             static u64 repairs{};
             if (++repairs <= 4) {
-                LOG_WARNING(Render_Vulkan,
-                            "Static UI quad diagnostic repaired: title={:016x} shader={:016x} "
-                            "gpu={:#x} device={:#x} bytes={} count={} frame={} (first 4 repairs)",
-                            Settings::GetCurrentProgramID(), pipeline->ShaderHashes()[1], geometry,
-                            *device_address, source.size(), repairs, render_trace_frame);
+                LOG_INFO(Render_Vulkan,
+                         "Static UI quad refreshed: title={:016x} shader={:016x} "
+                         "gpu={:#x} device={:#x} bytes={} count={} frame={} (first 4 refreshes)",
+                         Settings::GetCurrentProgramID(), pipeline->ShaderHashes()[1], geometry,
+                         *device_address, source.size(), repairs, render_trace_frame);
             }
             return true;
         };
