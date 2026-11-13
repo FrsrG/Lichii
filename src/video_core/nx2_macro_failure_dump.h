@@ -18,7 +18,6 @@
 namespace VideoCommon::Nx2MacroFailure {
 using Word = std::uint32_t;
 using Json = nlohmann::json;
-constexpr size_t MaxAttempts = 8;
 constexpr size_t MaxWords = 65536;
 constexpr size_t MaxReads = 4096;
 constexpr size_t MaxEmits = 4096;
@@ -58,16 +57,20 @@ inline bool ArmedFor(const void* owner, Word start, std::uint64_t generation) no
          gate->owner == owner && gate->start == start && gate->generation == generation;
 }
 
-// The first actual failure arms a following invocation: no state is copied for
-// ordinary calls.
+// An actual failure arms a following invocation: no state is copied before the
+// first failure. A different failing target may retarget an armed capture; a saved
+// failed invocation remains terminal. These transitions run on the GPU front thread.
 inline void NotifyFailure(const void *owner, Word start,
                           std::uint64_t generation) {
   auto *gate = GetGate();
   if (!gate || !IsTarget(start))
     return;
   Phase expected = Waiting;
-  if (!gate->phase.compare_exchange_strong(expected, Claiming))
-    return;
+  if (!gate->phase.compare_exchange_strong(expected, Claiming)) {
+    if (expected != Armed ||
+        !gate->phase.compare_exchange_strong(expected, Claiming))
+      return;
+  }
   gate->owner = owner;
   gate->start = start;
   gate->generation = generation;
@@ -146,12 +149,9 @@ struct Capture {
               std::span<const Word> dram_after) noexcept {
     finished = true;
     if (result.success) {
-      gate.phase.store(gate.attempts < MaxAttempts ? Armed : Done,
-                       std::memory_order_release);
-      if (gate.attempts == MaxAttempts)
-        LOG_WARNING(HW_GPU,
-                    "MME failure capture stopped: {} armed calls succeeded",
-                    MaxAttempts);
+      // Release this bounded temporary snapshot and keep waiting. Successful calls
+      // are not evidence that the intermittent failure will not recur.
+      gate.phase.store(Armed, std::memory_order_release);
       return;
     }
     gate.phase.store(Done, std::memory_order_release);

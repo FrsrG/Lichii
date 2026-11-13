@@ -135,8 +135,11 @@ the parameter bytes to their command entry and correct the failing path.
 
 `EDEN_NX2_MME_FAILURE_DUMP=<local-directory>` enables a bounded diagnostic,
 not a recovery path. A first observed failure arms a following matching macro
-invocation; at most eight attempts retain initial code/FIFO/RAM and capped
-read, emit and DMA traces. Captured JIT state includes the actual failure PC.
+invocation. Successful captures release their temporary state and keep waiting;
+a subsequent actual failure can retarget the armed engine/start/code generation.
+Only one capped code/FIFO/RAM/read/emit/DMA trace is retained at a time, and the
+first captured failure saves once and permanently disarms. Captured JIT state
+includes the actual failure PC.
 Trace completeness flags remain explicit when output exceeds the caps.
 
 The armed capture also records each argument's command-entry and accepted
@@ -167,6 +170,23 @@ second-write corruption (`18 == 187`); the fixed ordering passes all 14
 assertions. This verifies the cache fixture, not an end-to-end Rasterizer
 or Kirby result. The next controlled race tests whether this confirmed
 data-integrity fix resolves or contributes to the progression blocker.
+
+The next candidate (run 7, source `a9df95e`) still failed in Floria Fields:
+MME start `0x1d2` at 170.125 seconds, then repeated `0x1e7` failures from
+173.883 seconds, followed by device loss around 192.44 seconds. No origin
+capture was saved: the old diagnostic stopped after eight successful `0x1d2`
+invocations at 170.145 seconds. That cutoff and its inability to retarget
+could miss intermittent failures. The diagnostic now keeps waiting with bounded
+live memory and allows the later actual failure to retarget it. Successful
+matching calls continue to incur opt-in snapshot cost until capture; no trace
+history or output files accumulate for them.
+
+The standalone `tools/nx2/mme_capture_gate_probe.cpp` regression exercises 32
+successful captures without output, target/engine/generation retargeting,
+one failed save, and terminal disarming. It uses synthetic terminal results
+with the actual capture implementation; it does not execute GPU commands.
+Actual JIT backward-loop, FIFO/DMA replay, trace-cap, and default-off probes
+also pass. The next run must still establish real origin completeness.
 
 ## Acceptance record
 
