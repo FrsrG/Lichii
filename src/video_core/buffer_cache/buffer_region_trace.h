@@ -72,18 +72,18 @@ public:
                                                  : std::span<const u8>{};
         const std::string cpu_hex = Hex(std::span<const u8>{snapshot.data(), bytes});
         const std::string staged_hex = Hex(staged_part);
-        const std::string state = fmt::format("{}:{}:{}:{}:{}:{}:{}", detail0, detail1,
-                                             cpu_upload, tracker_gpu, range_gpu,
-                                             cpu_hex, staged_hex);
+        const std::string identity = fmt::format("{}:{}:{}", site, detail0, detail1);
+        const std::string state = fmt::format("{}:{}:{}:{}:{}", cpu_upload, tracker_gpu,
+                                             range_gpu, cpu_hex, staged_hex);
         std::scoped_lock lock{mutex};
         if (records.load(std::memory_order_relaxed) >= Limit) {
             return;
         }
-        const auto previous = last_states.find(site);
+        const auto previous = last_states.find(identity);
         if (previous != last_states.end() && previous->second == state) {
             return;
         }
-        last_states.insert_or_assign(site, state);
+        last_states.insert_or_assign(identity, state);
         const u32 number = records.fetch_add(1, std::memory_order_relaxed) + 1;
         LOG_INFO(HW_GPU,
                  "Buffer region trace #{} site={} selected={:#x}+{:#x} operation={:#x}+{:#x} "
