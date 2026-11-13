@@ -329,6 +329,28 @@ continuations log their macro, entry and address. A result restoring HUD and
 draw behavior would implicate late continuation reads/ring reuse; a clean full
 race and warmed repeat remain required runtime checks.
 
+## Snapshot comparison and bounded GPU capture
+
+The opt-in draw-continuation snapshot comparison removes the observed
+macro-limit failures in its test, but the race HUD still disappears during
+ordinary racing. This is not a playability fix and does not establish that
+submission snapshots are final GPU argument data. The comparison stays off.
+
+A single RenderDoc 1.47 first-HUD frame was captured and replayed offline
+after the emulator exited. Mapped argument provenance identifies the exact
+containing 17 MiB Vulkan buffer and 16-byte offset. Initial and final bytes
+match, and all 454 distinct write-capable events in that frame leave them
+unchanged. Its later failed invocation's different bytes are not observed
+in the captured frame. Thus this capture cannot identify the later writer
+or establish who corrupted the arguments. Resource overlap or RW binding
+alone is not evidence of an actual write.
+
+The raw capture, shader/resource data and replay observations stay local.
+Only summarized evidence is published. The portable global debug setting
+used for resource names was restored exactly after capture. The next normal
+control disables disk-cache loading, testing persisted captured-environment
+behavior without either RenderDoc or GPU-assisted validation.
+
 ## Acceptance record
 
 | Check | Result |
