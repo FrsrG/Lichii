@@ -292,6 +292,34 @@ map-deferred fill remains possible. Submission does not record writer,
 host-write or mapping generations, so the existing evidence cannot yet
 distinguish CPU ring reuse from genuinely GPU-produced argument data.
 
+## Diagnostic draw-continuation snapshot selection
+
+Run 11 captured a valid six-argument `0xe50` header crossing into a five-word
+GPU-written continuation. Those fetched words contained float-looking draw
+counts while the current submission snapshot held small integers. Run 12's
+`LIST_FORCE_FLUSH=1` control changed the exact path from copied-list memory to
+slow guest memory and still captured malformed counts. It completed a post-race
+selection trajectory without observed device loss, but HUD/text remained
+missing and MME limits persisted. The slow path can perform no GPU readback
+when current dirty bookkeeping selects no ranges; it is not unconditional
+proof of fresh GPU bytes.
+
+`EDEN_NX2_DRAW_CONTINUATION_SNAPSHOT=1` provides a narrower cause-discriminating
+A/B. It applies only to Kirby's active split-front native Maxwell macros mapped
+to the captured starts `0x1d2` or `0x1e7`, where a whole entry exactly supplies
+the already-active packet's remaining one to eight arguments. It requires a
+present, nondeferred, bounds-checked snapshot with the same even suspension
+count, no entry resume, and normal DMA. Only the historical ever-GPU-written
+exclusion is overridden. Every other entry keeps the existing selection rules.
+
+This is default-off and not a proven coherency correction: snapshots can be
+genuine pre-producer placeholders. A failed or missing draw under this A/B is
+evidence against choosing them, not justification for fabricating counts.
+Origins use `diagnostic-native-draw-current-snapshot`, and the first 16 selected
+continuations log their macro, entry and address. A result restoring HUD and
+draw behavior would implicate late continuation reads/ring reuse; a clean full
+race and warmed repeat remain required runtime checks.
+
 ## Acceptance record
 
 | Check | Result |

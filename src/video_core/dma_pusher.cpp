@@ -284,6 +284,8 @@ bool DmaPusher::Step() {
                 IsGpuWrittenCommands(dma_state.dma_get, size_t{header.size} * sizeof(u32));
         }
         // Resume and GPU-written entries need live words, even after a flush cleared dirty state.
+        const bool diagnostic_draw_snapshot =
+            UseDiagnosticDrawSnapshot(command_list, header, gpu_written, use_safe);
         const bool submitted = (command_list.snapshot_suspensions & 1) == 0 &&
                                command_list.snapshot_suspensions ==
                                    suspensions.load(std::memory_order_acquire) &&
@@ -292,7 +294,7 @@ bool DmaPusher::Step() {
             dma_pushbuffer_subindex < command_list.submitted_offsets.size() &&
                 !std::ranges::binary_search(command_list.deferred_entries,
                                             static_cast<u32>(dma_pushbuffer_subindex)),
-            gpu_written,
+            gpu_written && !diagnostic_draw_snapshot,
             use_safe && memory_manager.IsMemoryDirty(dma_state.dma_get,
                                                      header.size * sizeof(u32)));
         // An entry parsed from memory instead of its submit-time copy is the way a command
@@ -323,7 +325,10 @@ bool DmaPusher::Step() {
                 header.size};
             RecordParsedEntry(header, commands);
             Nx2CmdPageDiag::CountEntry(Nx2CmdPageDiag::Path::Submitted);
-            BeginOriginParse(&header, commands, command_list, "submitted-current-snapshot", gpu_written);
+            BeginOriginParse(&header, commands, command_list,
+                             diagnostic_draw_snapshot ? "diagnostic-native-draw-current-snapshot"
+                                                      : "submitted-current-snapshot",
+                             gpu_written);
             command_resume_offset += ProcessCommands(commands, 0);
         } else if (use_safe) {
             Tegra::Memory::GpuGuestMemory<Tegra::CommandHeader, Tegra::Memory::GuestMemoryFlags::SafeRead>headers(memory_manager, dma_state.dma_get, header.size, &command_headers);
@@ -544,6 +549,50 @@ void DmaPusher::ResolveSplitMethod(GPUVAddr entry_address) {
         dma_increment_once = resume->increment_once;
         origin_header = resume->header_origin;
     }
+}
+
+bool DmaPusher::UseDiagnosticDrawSnapshot(const CommandList& list,
+                                        const CommandListHeader& header,
+                                        bool gpu_written, bool use_safe) {
+    // Cause-discriminating A/B, not a rule for selecting GPU-produced commands.
+    static const bool enabled = [] {
+        const char* value = std::getenv("EDEN_NX2_DRAW_CONTINUATION_SNAPSHOT");
+        return value && std::string_view{value} == "1";
+    }();
+    if (!enabled || !gpu_written || use_safe || command_resume_offset != 0 ||
+        Settings::GetCurrentProgramID() != 0x040077201BE50000ULL ||
+        dma_state.method_count == 0 || dma_state.method_count > 8 ||
+        dma_state.method_count != header.size || dma_state.method < MacroRegistersStart ||
+        subchannel_type[dma_state.subchannel] != Engines::EngineTypes::Maxwell3D ||
+        !subchannels[dma_state.subchannel] ||
+        (list.snapshot_suspensions & 1) != 0 ||
+        list.snapshot_suspensions != suspensions.load(std::memory_order_acquire) ||
+        dma_pushbuffer_subindex >= list.submitted_offsets.size() ||
+        std::ranges::binary_search(list.deferred_entries, static_cast<u32>(dma_pushbuffer_subindex)))
+        return false;
+    auto& split = VideoCommon::GpuSplit::Get();
+    if (!split.Active() || !split.FrontMacros()) return false;
+    auto& engine = *static_cast<Engines::Maxwell3D*>(subchannels[dma_state.subchannel]);
+    if (!engine.GetNativeMacroEngine().native_turing) return false;
+    const auto positions = engine.GetNativeMacroPositions();
+    if (positions.empty()) return false;
+    const u32 start = positions[((dma_state.method - MacroRegistersStart) >> 1) % positions.size()];
+    if (start != 0x1d2 && start != 0x1e7) return false;
+    const size_t offset = list.submitted_offsets[dma_pushbuffer_subindex];
+    if (offset > list.submitted_words.size() ||
+        size_t{header.size} > list.submitted_words.size() - offset)
+        return false;
+    static u32 logged{};
+    if (logged < 16) {
+        ++logged;
+        LOG_WARNING(HW_GPU,
+                    "Diagnostic native draw continuation snapshot: start={:#x} method={:#x} "
+                    "channel={} entry={} address={:#x} words={} (first 16 only; may be a "
+                    "pre-producer placeholder)",
+                    start, dma_state.method, channel_state.bind_id, dma_pushbuffer_subindex,
+                    u64{header.addr}, u64{header.size});
+    }
+    return true;
 }
 
 void DmaPusher::BeginOriginParse(const CommandListHeader* header,

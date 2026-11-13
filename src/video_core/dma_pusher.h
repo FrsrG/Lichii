@@ -327,6 +327,8 @@ private:
     void NoteMethodHeader(const CommandHeader& command_header, size_t word_offset);
     void BeginOriginParse(const CommandListHeader* header, std::span<const CommandHeader> words,
                           const CommandList& list, const char* path, bool gpu_written = false);
+    bool UseDiagnosticDrawSnapshot(const CommandList& list, const CommandListHeader& header,
+                                   bool gpu_written, bool use_safe);
 
     void CallMethod(u32 argument);
     void CallMultiMethod(const u32* base_start, u32 num_methods);
