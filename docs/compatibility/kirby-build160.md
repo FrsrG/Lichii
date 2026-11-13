@@ -753,6 +753,15 @@ A 2.54-second transient remains; the result is a **conditional pass** under
 the existing cache, snapshot/depth/flush and rendering/menu limitations.
 No warmed repeat or additional source/configuration change was needed.
 
+Run 41 completed Mount Amberfalls' default single lap on its first measured
+attempt, reaching the verified celebration with zero MME-limit errors/device
+losses and clean shutdown. All 24 continuous intervals met 30 FPS (minimum
+34.03) at unchanged full-resolution/100% settings and the fixed roster. A
+2.20-second transient remains. This completes **eight conditional course
+passes in menu order**, with the existing cache, snapshot/depth/flush and
+rendering/menu limitations. It does not establish an every-frame FPS floor,
+smoothness, cold-cache performance, or all-roster/effect coverage.
+
 | Check | Result |
 | --- | --- |
 | Unmodified build-160 startup | Stack overflow reproduced |
@@ -769,7 +778,8 @@ No warmed repeat or additional source/configuration change was needed.
 | Steamgust Forge, two laps | Conditional pass on first measured attempt, run 37 |
 | Cavernous Corners, two laps | Conditional covered-key pass in run 39; run 38 remains a performance failure |
 | Cyberion Highway, two laps | Conditional pass on first measured attempt, run 40 |
-| Final course in menu order | Pending |
+| Mount Amberfalls, one lap | Conditional pass on first measured attempt, run 41 |
+| All eight Air Ride courses in menu order | Conditional completion under documented cache/roster/workarounds; original-install delivery pending |
 
 Only source changes, tests, and summarized verification belong in this
 repository. Game files, keys, firmware, saves, native shader captures,
