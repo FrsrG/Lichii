@@ -450,6 +450,14 @@ acceptance pass. HUD/results defects, macro warnings without demonstrated
 playability impact, and performance between 30 and 60 FPS remain deferred.
 All eight courses still require qualification; Floria remains the active course.
 
+The observed fatal timeline-semaphore wait catch now invokes the existing
+feature-guarded Vulkan device-fault reporter on `VK_ERROR_DEVICE_LOST` before
+rethrowing the original exception. Reporting exceptions cannot mask that
+original failure, and no normal-execution behavior or recovery is added.
+This covers the observed wait exception, not failures from the separate counter
+refresh calls outside that catch. The affected translation unit compiles; live
+driver fault data and a gameplay benefit have not been demonstrated.
+
 ## Acceptance record
 
 | Check | Result |

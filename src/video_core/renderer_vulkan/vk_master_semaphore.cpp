@@ -4,6 +4,7 @@
 // SPDX-FileCopyrightText: Copyright 2020 yuzu Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <exception>
 #include <thread>
 
 #include <ranges>
@@ -113,6 +114,15 @@ void MasterSemaphore::Wait(u64 tick) {
     } catch (const vk::Exception& exception) {
         // The throw ends the process; say why first (a device loss reached nothing else here).
         LOG_CRITICAL(Render_Vulkan, "Waiting for GPU tick {} failed: {}", tick, exception.what());
+        if (exception.GetResult() == VK_ERROR_DEVICE_LOST) {
+            try {
+                device.ReportDeviceFault();
+            } catch (const std::exception& fault_error) {
+                LOG_CRITICAL(Render_Vulkan, "Device fault reporting failed: {}", fault_error.what());
+            } catch (...) {
+                LOG_CRITICAL(Render_Vulkan, "Device fault reporting failed with an unknown error");
+            }
+        }
         throw;
     }
 
