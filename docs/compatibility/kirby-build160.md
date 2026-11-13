@@ -16,7 +16,7 @@ The exception-thread unwind contains 1,615 recursive return frames at
 `lichii.exe+0x1ac16be`, with a 0x260-byte stride. The direct self-call belongs
 to `CollectIteratorWords` in
 `src/shader_recompiler/ir_opt/global_memory_to_storage_buffer_pass.cpp`.
-That traversal alone consumes approximately 982 KiB of the executable's
+That traversal alone consumes approximately 960 KiB of the executable's
 1 MiB default stack reserve. The native dump and disassembly are retained
 locally; they are not repository artifacts.
 
@@ -26,8 +26,11 @@ A separate executable with only its PE stack reserve increased to 64 MiB
 reaches the main menu and starts Floria Fields. This is a diagnostic
 experiment, not the proposed compatibility fix or a validated deliverable.
 Reversible menu inputs confirm debug-controller control of Player 1.
-The observed first race has reached lap 2 of 3, but has not yet passed the
-race/results/restart acceptance test.
+The first race completed all three laps: Player 1 finished second in
+2:53.00. The post-race placement screen, unlock screens, and return to the
+Floria Fields course-selection menu were observed. No steering input was
+injected during racing. This is a diagnostic completion only; a normal-stack
+patched executable and warmed repeat remain unverified.
 
 Later logs show invalid placeholder device addresses beginning at
 `0xffffff8120def000` and native MME split-front instruction-limit errors
@@ -41,7 +44,8 @@ stack-reserve experiment does not establish full compatibility.
 | Unmodified build-160 startup | Stack overflow reproduced |
 | Source traversal regression tests | Pending |
 | Patched normal-stack startup | Pending |
-| Floria Fields complete race, results, menu | Pending |
+| Diagnostic Floria Fields race, result, menu | Completed; macro/render errors remain |
+| Patched Floria Fields race, result, menu | Pending |
 | Floria Fields warmed repeat | Pending |
 | Remaining courses in menu order | Pending |
 
