@@ -611,6 +611,18 @@ is not established as the cause of every stall. One unchanged warmed repeat
 is justified before further performance diagnosis; course three remains blocked
 until course two satisfies the full gate.
 
+Run 28 supplies that warmed Waveflow qualification: the same two-lap race
+finished and reached the orange celebration with no MME-limit errors or device
+loss, then closed cleanly. All completed measurement windows stayed above
+30 FPS; racing windows ranged from 41.47 to 58.60 FPS at the normal 100%
+setting. A 2.10-second transient interval still occurred, so this is a sampled
+sustained target with occasional stutter, not an absolute per-frame floor.
+Track/rider/other racers and course progress were observed; HUD loss and
+intermittent black shading/water patches remain deferred rendering defects.
+Waveflow is a conditional pass using the same snapshot/depth/flush settings,
+the warmed local cache and restart recovery for readable menus. The first-use
+run remains a performance failure and is not rewritten as a pass.
+
 | Check | Result |
 | --- | --- |
 | Unmodified build-160 startup | Stack overflow reproduced |
@@ -621,8 +633,8 @@ until course two satisfies the full gate.
 | Diagnostic Floria Fields race, result, menu | Completed; macro/render errors remain |
 | Floria Fields at current 30 FPS gate | Conditional pass in run 26; readable next-course access restored by restart in run 27 |
 | Pre-macro raw buffer comparison | Live stable-mapping CPU/selected/GPU agreement; earlier producer remains unknown |
-| Floria Fields warmed repeat | Pending |
-| Remaining courses in menu order | Pending |
+| Waveflow Waters, two laps | Conditional warmed pass in run 28; first-use run 27 below 30 FPS |
+| Remaining six courses in menu order | Pending |
 
 Only source changes, tests, and summarized verification belong in this
 repository. Game files, keys, firmware, saves, native shader captures,
